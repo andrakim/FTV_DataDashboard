@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FTV · Broadcast Analytics</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js"></script>
+  <style>
+    body { background: #f3f6fb; color: #17243b; font-family: system-ui, sans-serif; margin: 0; }
+    main { max-width: 1440px; margin: auto; padding: 28px; }
+    .panel { background: white; border: 1px solid #e2e8f0; border-radius: 16px; padding: 22px; margin-top: 18px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; }
+    label { display: grid; gap: 6px; font-size: 14px; }
+    select, input, button { font: inherit; padding: 8px; border: 1px solid #cbd5e1; border-radius: 8px; }
+    h1 { font-size: 28px; font-weight: 700; } h2 { font-size: 20px; font-weight: 650; }
+    .chart { height: 350px; width: 100%; } #grid-chart { height: 410px; }
+    .muted { color: #64748b; } .error { color: #b91c1c; }
+    #pain-points { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    article { border: 1px solid #f1b5b5; border-radius: 12px; padding: 16px; }
+    article p { margin-top: 8px; } [hidden] { display: none !important; }
+    #scan-image { max-width: 100%; height: auto; }
+  </style>
+</head>
+<body>
+  <main>
+    <header><p class="muted">FTV (UZ/RU) · эфирные сутки 05:00–29:00</p><h1>Аналитика эфира и провалы слотов</h1></header>
+    <section class="panel">
+      <label>Загрузить Excel-отчёты <input id="files" type="file" accept=".xlsx,.xlsm" multiple></label>
+      <p id="status" class="muted" role="status" aria-live="polite">База данных загружается…</p>
+      <details id="warnings" hidden><summary>Замечания к импорту</summary><ul id="warning-list"></ul></details>
+    </section>
+    <section class="panel controls" aria-label="Фильтры сравнения">
+      <label>Режим<select id="mode"><option value="week">Неделя с неделей</option><option value="dayOfWeek">День недели</option><option value="season">Сезоны</option><option value="year">Годы</option></select></label>
+      <label>Аудитория<select id="audience"><option>18-54</option><option>25-34</option></select></label>
+      <label>С даты<input id="date-from" type="date"></label><label>По дату<input id="date-to" type="date"></label>
+      <label id="period-a-label">Период A<select id="period-a"></select></label><label id="period-b-label">Период B<select id="period-b"></select></label>
+      <label id="weekday-label" hidden>День недели<select id="weekday"><option value="1">Понедельник</option><option value="2">Вторник</option><option value="3">Среда</option><option value="4" selected>Четверг</option><option value="5">Пятница</option><option value="6">Суббота</option><option value="7">Воскресенье</option></select></label>
+      <label style="display: flex; align-items: center"><input id="workdays" type="checkbox">Только рабочие дни</label>
+    </section>
+    <section class="panel"><h2>Сравнение периодов</h2><p id="summary" class="muted"></p><div id="comparison-chart" class="chart"></div></section>
+    <section class="panel"><div class="controls"><h2>Сетка вещания</h2><label>Отчётная дата<select id="grid-date"></select></label><button id="show-scan" type="button">Оригинальный скан</button></div><p id="grid-note" class="muted"></p><div id="grid-chart" class="chart"></div><img id="scan-image" alt="Оригинальная сетка из Excel" hidden></section>
+    <section class="panel"><h2>Провалы слотов</h2><p id="drops-note" class="muted"></p><div id="pain-points"></div></section>
+  </main>
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>

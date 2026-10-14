@@ -1,0 +1,11 @@
+node_modules/
+.pnpm-store/
+test-results/
+__pycache__/
+dist/
+sites/
+samples/*.xlsx
+samples/*.xlsm
+.sites-runtime/
+.sites-checkout/
+*.tar.gz
