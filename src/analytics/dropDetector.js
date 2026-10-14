@@ -46,15 +46,24 @@ export function attributeCompetitors(program, data, { audience = '18-54', channe
     startSec: row.startSec ?? BROADCAST_START + row.slotIndex * SLOT_SECONDS,
     endSec: row.endSec ?? BROADCAST_START + (row.slotIndex + 1) * SLOT_SECONDS }));
   const logs = (data.program_logs ?? []).filter(row => row.dateISO === dateISO && (row.audience ?? '18-54') === audience);
-  const channels = new Set([...grid.flatMap(row => Object.keys(row.channels ?? {})), ...logs.map(row => row.channel)]);
+  const gridByChannel = new Map(), logsByChannel = new Map();
+  for (const row of grid) for (const competitor of Object.keys(row.channels ?? {})) {
+    const metrics = channelMetrics(row, competitor, audience); if (!metrics) continue;
+    const key = normalizeChannel(competitor);
+    if (!gridByChannel.has(key)) gridByChannel.set(key, []);
+    gridByChannel.get(key).push({ ...row, ...metrics });
+  }
+  for (const row of logs) {
+    const key = normalizeChannel(row.channel);
+    if (!logsByChannel.has(key)) logsByChannel.set(key, []);
+    logsByChannel.get(key).push(row);
+  }
+  const channels = new Set([...gridByChannel.keys(), ...logsByChannel.keys()]);
   const candidates = [];
   for (const competitor of channels) {
     if (normalizeChannel(competitor) === ftv) continue;
-    const gridRows = grid.flatMap(row => {
-      const metrics = channelMetrics(row, competitor, audience);
-      return metrics ? [{ ...row, ...metrics }] : [];
-    });
-    const programRows = logs.filter(row => normalizeChannel(row.channel) === normalizeChannel(competitor));
+    const gridRows = gridByChannel.get(competitor) ?? [];
+    const programRows = logsByChannel.get(competitor) ?? [];
     // Prefer exact program boundaries. Use a consistent source for both windows.
     const exactBefore = windowShare(programRows, previousStart, previousEnd), exactDuring = windowShare(programRows, currentStart, currentEnd);
     const useLogs = exactBefore.coverageSeconds === SLOT_SECONDS && exactDuring.coverageSeconds >= (currentEnd - currentStart) * 0.9;
@@ -84,6 +93,11 @@ export function detectSlotDrops(data, {
   if (![retentionThreshold, minimumLeadInShare, primeDailyFraction, maxGapSec].every(v => finite(v) && v >= 0)) throw new Error('Некорректные пороги детектора');
   if (from && to && from > to) throw new Error('Начало периода позже конца');
   const daily = new Map((data.daily_metrics ?? []).map(row => [row.dateISO, row]));
+  const dataByDate = new Map();
+  for (const name of ['program_logs', 'grid_10min']) for (const row of data[name] ?? []) {
+    if (!dataByDate.has(row.dateISO)) dataByDate.set(row.dateISO, { program_logs: [], grid_10min: [] });
+    dataByDate.get(row.dateISO)[name].push(row);
+  }
   const unique = new Map();
   for (const row of data.program_logs ?? []) {
     if (normalizeChannel(row.channel) !== normalizeChannel(channel) || (row.audience ?? '18-54') !== audience) continue;
@@ -111,7 +125,7 @@ export function detectSlotDrops(data, {
     if (finite(program.share) && finite(previous?.share) && finite(next?.share) && program.share < previous.share && program.share < next.share) triggers.push('midBlockValley');
     if (!includeHealthy && !triggers.length) continue;
     if (!benchmarks.has(program.dateISO)) {
-      const grid = (data.grid_10min ?? []).filter(row => row.dateISO === program.dateISO);
+      const grid = dataByDate.get(program.dateISO)?.grid_10min ?? [];
       const gridParts = buildDaypartProfile(grid, { channel, audience });
       // Exact TOP logs provide a fallback when the day's grid is absent.
       benchmarks.set(program.dateISO, gridParts.map(part => ({ ...part, share: part.share ?? weightedMean(programs.filter(row => row.dateISO === program.dateISO).map(row => ({ value: row.share, weight: overlap(part.startSec, part.endSec, row) }))) })));
@@ -123,7 +137,7 @@ export function detectSlotDrops(data, {
       leadInRetention: retention, leadOutRetention, deltaShare, dailyShare: dailyShare ?? null,
       daypart: part?.id ?? null, daypartBenchmark,
       deviationFromDaypart: finite(program.share) && finite(daypartBenchmark) ? program.share - daypartBenchmark : null,
-      competitors: triggers.length ? attributeCompetitors(program, data, { channel, audience }) : [],
+      competitors: triggers.length ? attributeCompetitors(program, dataByDate.get(program.dateISO) ?? {}, { channel, audience }) : [],
       demographics: demographicLoss(previous, program),
       // Share changes and demographic differences show co-occurrence, not tracked viewer migration.
       attributionNote: 'Рост конкурента совпадает по времени с провалом; индивидуальный переход зрителей не установлен.',

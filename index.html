@@ -1,49 +1,78 @@
 <!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FTV · Broadcast Analytics</title>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="FTV: сравнение телевизионного эфира, программы и анализ потерь аудитории.">
+  <title>FTV · Аналитика эфира</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js"></script>
-  <style>
-    body { background: #f3f6fb; color: #17243b; font-family: system-ui, sans-serif; margin: 0; }
-    main { max-width: 1440px; margin: auto; padding: 28px; }
-    .panel { background: white; border: 1px solid #e2e8f0; border-radius: 16px; padding: 22px; margin-top: 18px; }
-    .controls { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; }
-    label { display: grid; gap: 6px; font-size: 14px; }
-    select, input, button { font: inherit; padding: 8px; border: 1px solid #cbd5e1; border-radius: 8px; }
-    h1 { font-size: 28px; font-weight: 700; } h2 { font-size: 20px; font-weight: 650; }
-    .chart { height: 350px; width: 100%; } #grid-chart { height: 410px; }
-    .muted { color: #64748b; } .error { color: #b91c1c; }
-    #pain-points { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
-    article { border: 1px solid #f1b5b5; border-radius: 12px; padding: 16px; }
-    article p { margin-top: 8px; } [hidden] { display: none !important; }
-    #scan-image { max-width: 100%; height: auto; }
-  </style>
+  <link rel="stylesheet" href="./src/ui/styles.css">
 </head>
 <body>
-  <main>
-    <header><p class="muted">FTV (UZ/RU) · эфирные сутки 05:00–29:00</p><h1>Аналитика эфира и провалы слотов</h1></header>
-    <section class="panel">
-      <label>Загрузить Excel-отчёты <input id="files" type="file" accept=".xlsx,.xlsm" multiple></label>
-      <p id="status" class="muted" role="status" aria-live="polite">База данных загружается…</p>
-      <details id="warnings" hidden><summary>Замечания к импорту</summary><ul id="warning-list"></ul></details>
-    </section>
-    <section class="panel controls" aria-label="Фильтры сравнения">
-      <label>Режим<select id="mode"><option value="week">Неделя с неделей</option><option value="dayOfWeek">День недели</option><option value="season">Сезоны</option><option value="year">Годы</option></select></label>
-      <label>Аудитория<select id="audience"><option>18-54</option><option>25-34</option></select></label>
-      <label>С даты<input id="date-from" type="date"></label><label>По дату<input id="date-to" type="date"></label>
-      <label id="period-a-label">Период A<select id="period-a"></select></label><label id="period-b-label">Период B<select id="period-b"></select></label>
-      <label id="weekday-label" hidden>День недели<select id="weekday"><option value="1">Понедельник</option><option value="2">Вторник</option><option value="3">Среда</option><option value="4" selected>Четверг</option><option value="5">Пятница</option><option value="6">Суббота</option><option value="7">Воскресенье</option></select></label>
-      <label style="display: flex; align-items: center"><input id="workdays" type="checkbox">Только рабочие дни</label>
-    </section>
-    <section class="panel"><h2>Сравнение периодов</h2><p id="summary" class="muted"></p><div id="comparison-chart" class="chart"></div></section>
-    <section class="panel"><div class="controls"><h2>Сетка вещания</h2><label>Отчётная дата<select id="grid-date"></select></label><button id="show-scan" type="button">Оригинальный скан</button></div><p id="grid-note" class="muted"></p><div id="grid-chart" class="chart"></div><img id="scan-image" alt="Оригинальная сетка из Excel" hidden></section>
-    <section class="panel"><h2>Провалы слотов</h2><p id="drops-note" class="muted"></p><div id="pain-points"></div></section>
-  </main>
+  <svg class="svg-defs" aria-hidden="true"><defs>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 4v16h16M8 15v-4m5 4V7m5 8v-6"/></symbol>
+    <symbol id="i-compare" viewBox="0 0 24 24"><path d="M4 7h16m-4-4 4 4-4 4M20 17H4m4-4-4 4 4 4"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3z"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+    <symbol id="i-drop" viewBox="0 0 24 24"><path d="m3 6 7 7 4-4 7 9m-6 0h6v-6"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V3m-5 5 5-5 5 5M4 15v5h16v-5"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v13m-5-5 5 5 5-5M4 17v4h16v-4"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 0 1 6 0c0 2-3 2-3 4m0 3h.01"/></symbol>
+  </defs></svg>
+  <aside class="sidebar">
+    <a class="brand" href="#overview" aria-label="FTV, обзор"><span class="brand-mark">FTV<span></span></span><span class="brand-copy">Broadcast<span>Аналитика эфира</span></span></a>
+    <p class="nav-caption">РАБОЧЕЕ ПРОСТРАНСТВО</p>
+    <nav id="navigation" aria-label="Разделы приложения">
+      <button data-view="overview" class="nav-item active" aria-current="page"><svg><use href="#i-chart"/></svg>Обзор</button>
+      <button data-view="comparison" class="nav-item"><svg><use href="#i-compare"/></svg>Сравнение периодов</button>
+      <button data-view="programs" class="nav-item"><svg><use href="#i-play"/></svg>Программы<span id="nav-program-count" class="nav-count"></span></button>
+      <button data-view="grid" class="nav-item"><svg><use href="#i-grid"/></svg>Сетка вещания</button>
+      <button data-view="drops" class="nav-item"><svg><use href="#i-drop"/></svg>Провалы слотов</button>
+    </nav>
+    <div class="sidebar-bottom"><span class="live-dot"></span> Данные в вашем браузере<p id="sidebar-dataset">Загрузите первый отчёт</p><span class="sidebar-channel">FTV (UZ/RU) <span>05:00–29:00</span></span></div>
+  </aside>
+  <div class="workspace">
+    <header class="topbar"><div class="breadcrumb">FTV Broadcast <span>/</span> <strong id="breadcrumb-view">Обзор</strong></div><div class="top-actions"><button id="help" class="icon-button" aria-label="Как пользоваться"><svg><use href="#i-help"/></svg></button><button id="export" class="button secondary" disabled><svg><use href="#i-download"/></svg><span>Экспорт CSV</span></button><button class="button primary" data-upload><svg><use href="#i-upload"/></svg>Загрузить отчёты</button></div></header>
+    <main>
+      <div class="page-heading"><div><p class="eyebrow">ТЕЛЕВИЗИОННЫЙ ЭФИР · FTV (UZ/RU)</p><h1 id="page-title">Эфир в цифрах</h1><p id="page-description" class="muted">От общей картины — к конкретной программе.</p></div><div id="data-range" class="date-label"></div></div>
+      <section class="filter-bar" aria-label="Общие фильтры">
+        <div><span class="control-label">Аудитория</span><div class="segmented compact" id="audience-buttons" aria-label="Аудитория"><button data-audience="18-54" aria-pressed="true">18–54</button><button data-audience="25-34" aria-pressed="false">25–34</button></div></div>
+        <div><label class="control-label" for="date-from">Период</label><div class="date-inputs"><input id="date-from" type="date" aria-label="Начало периода"><span>—</span><input id="date-to" type="date" aria-label="Конец периода"></div></div>
+        <div id="range-buttons" class="quick-ranges"><button data-range="7">7 дней</button><button data-range="30">30 дней</button><button data-range="all" class="active">Всё</button></div>
+        <label class="check-control"><input id="workdays" type="checkbox"><span>Только рабочие дни</span></label>
+      </section>
+      <p id="status" class="status-line" role="status" aria-live="polite">Загружаем базу…</p>
+      <section id="import-progress" class="panel import-progress" hidden><div><strong id="import-progress-title">Импорт отчётов</strong><span id="import-progress-count"></span></div><progress id="import-meter" max="1" value="0"></progress></section>
+      <section id="import-result" class="panel" hidden><details><summary id="import-result-summary">Результаты импорта</summary><div id="import-result-list" class="import-results"></div></details></section>
+      <section id="empty-state" class="panel welcome" hidden><div class="welcome-icon"><svg><use href="#i-chart"/></svg></div><p class="eyebrow">НАЧНИТЕ С ДАННЫХ</p><h2>У каждого эфира есть своя история</h2><p>Загрузите Excel-отчёты FTV, чтобы сравнивать дни,<br>видеть программы и находить потери аудитории.</p><button class="button primary" data-upload><svg><use href="#i-upload"/></svg>Выбрать Excel-файлы</button><div class="welcome-steps"><span><b>01</b> Загрузите отчёты</span><span><b>02</b> Выберите период</span><span><b>03</b> Исследуйте эфир</span></div><small>Можно выбрать несколько файлов. Данные сохраняются в этом браузере.</small></section>
+      <div id="data-content" hidden>
+        <section id="overview-view" data-panel="overview">
+          <div id="overview-kpis" class="kpi-grid"></div>
+          <div class="overview-layout"><section class="panel"><div class="panel-heading"><div><p class="eyebrow">ДИНАМИКА</p><h2 id="overview-chart-title">Доля FTV за период</h2></div><span class="badge">По дням</span></div><div id="overview-chart" class="chart"></div><p class="chart-footnote">Нажмите на точку, чтобы открыть эфир выбранного дня.</p></section><section class="panel overview-insights"><p class="eyebrow">ЧТО В ДАННЫХ</p><h2>Покрытие периода</h2><div id="coverage"></div><button class="text-button" data-go="programs">Перейти к программам <span>↗</span></button></section></div>
+          <div class="overview-layout"><section class="panel"><div class="panel-heading"><div><p class="eyebrow">КАНАЛЫ</p><h2>Конкурентное окружение</h2></div><span class="muted small">Средняя доля</span></div><div id="competitor-ranking"></div></section><section class="panel"><p class="eyebrow">ЭФИР</p><h2>Быстрый переход</h2><div class="action-links"><button data-go="comparison" data-mode="dayOfWeek"><strong>Все понедельники, вторники…</strong><span>Найти закономерности по дням недели ↗</span></button><button data-go="programs"><strong>Расписание и каталог программ</strong><span>Показатели, выпуски, вход и выход ↗</span></button><button data-go="drops"><strong>Где теряем аудиторию</strong><span>Провалы и рост конкурентов ↗</span></button></div></section></div>
+        </section>
+        <section id="comparison-view" data-panel="comparison" hidden>
+          <section class="panel comparison-controls"><div id="mode-buttons" class="segmented modes" role="tablist" aria-label="Режим сравнения"><button data-mode="week" role="tab" aria-selected="true">Неделя с неделей</button><button data-mode="dayOfWeek" role="tab" aria-selected="false">Дни недели</button><button data-mode="season" role="tab" aria-selected="false">Сезоны</button><button data-mode="year" role="tab" aria-selected="false">Годы</button></div><p id="mode-explanation" class="muted"></p>
+            <div id="period-selectors" class="period-selectors"><label><span class="period-dot current"></span>Период A<select id="period-a"></select></label><span class="versus">сравнить с</span><label><span class="period-dot baseline"></span>Период B<select id="period-b"></select></label><button id="swap-periods" class="icon-button" aria-label="Поменять периоды местами"><svg><use href="#i-compare"/></svg></button></div>
+            <div id="weekday-control" hidden><div id="weekday-buttons" class="weekday-buttons" aria-label="Выберите день недели"></div><div class="cohort-heading"><div><strong id="weekday-title"></strong><span id="weekday-subtitle" class="muted small"></span></div><button id="select-curves" class="text-button">Последние 6 дат</button></div><div id="curve-dates" class="date-chips"></div></div>
+          </section>
+          <div id="comparison-kpis" class="kpi-grid"></div>
+          <section class="panel"><div class="panel-heading chart-heading"><div><p class="eyebrow">СРАВНЕНИЕ</p><h2 id="comparison-title">Динамика периода</h2></div><div id="chart-view-buttons" class="segmented compact"><button data-chart-view="daily">По дням</button><button data-chart-view="slots">По времени</button><button data-chart-view="dayparts">По блокам</button></div></div><p id="summary" class="muted"></p><div id="comparison-chart" class="chart"></div><p id="comparison-note" class="chart-footnote"></p></section>
+          <section class="panel"><div class="panel-heading"><h2 id="comparison-table-title">Показатели периодов</h2><span class="muted small">Нажмите на дату для просмотра эфира</span></div><div class="table-scroll"><table id="comparison-table"></table></div></section>
+        </section>
+        <div id="broadcast-toolbar" class="broadcast-toolbar" hidden><div><button id="previous-date" class="icon-button" aria-label="Предыдущий эфирный день">←</button><label>Эфирный день<select id="broadcast-date"></select></label><button id="next-date" class="icon-button" aria-label="Следующий эфирный день">→</button></div><span id="broadcast-coverage" class="muted small"></span></div>
+        <section id="programs-view" data-panel="programs" hidden><section class="panel"><div class="panel-heading"><div id="program-layout-buttons" class="segmented compact"><button data-program-layout="schedule">Эфир за день</button><button data-program-layout="catalog">Каталог за период</button></div><span id="program-count" class="badge"></span></div><div class="program-filters"><label class="search-field"><span>⌕</span><input id="program-search" type="search" placeholder="Поиск по названию программы…" aria-label="Поиск программы"></label><label>Канал<select id="program-channel"></select></label><label>Время эфира<select id="program-daypart"><option value="all">Весь день</option></select></label><label>Порядок<select id="program-sort"><option value="time">По времени</option><option value="share">По доле ↓</option><option value="title">По названию</option></select></label></div><p id="program-note" class="muted small"></p><div id="program-timeline" class="chart timeline"></div><div class="table-scroll"><table id="program-table"></table></div><div id="program-pagination" class="pagination"></div></section></section>
+        <section id="grid-view" data-panel="grid" hidden><section class="panel"><div class="panel-heading"><div><p class="eyebrow">144 ИНТЕРВАЛА · 10 МИНУТ</p><h2>Карта аудитории</h2></div><button id="show-scan" class="button secondary">Оригинальный скан</button></div><p id="grid-note" class="muted small">Нажмите на слот, чтобы открыть программу.</p><div id="grid-chart" class="chart grid-chart"></div><div id="grid-empty" class="inline-empty" hidden></div><img id="scan-image" alt="Оригинальная сетка вещания из Excel" hidden></section></section>
+        <section id="drops-view" data-panel="drops" hidden><section class="panel"><div class="panel-heading"><div><p class="eyebrow">ПОТЕРИ АУДИТОРИИ</p><h2>Провалы слотов</h2></div><div id="drop-range-buttons" class="segmented compact"><button data-drop-range="day">Выбранный день</button><button data-drop-range="period">Весь период</button></div></div><p id="drops-note" class="muted small"></p><div id="pain-points" class="pain-points"></div><div id="more-drops" class="pagination"></div></section></section>
+      </div>
+      <footer class="app-footer"><span>FTV Broadcast Analytics</span><span>Даты — из отчётов · Эфирные сутки 05:00–29:00</span></footer>
+    </main>
+  </div>
+  <input id="files" type="file" accept=".xlsx,.xlsm" multiple hidden>
+  <dialog id="program-detail" class="program-dialog"><button id="close-program" class="dialog-close" aria-label="Закрыть программу">×</button><div id="program-detail-content"></div></dialog>
+  <dialog id="help-dialog" class="help-dialog"><button id="close-help" class="dialog-close" aria-label="Закрыть справку">×</button><p class="eyebrow">КАК ПОЛЬЗОВАТЬСЯ</p><h2>От отчёта к решению</h2><ol><li><strong>Загрузите Excel.</strong> Один файл добавляет 60 дней истории, 8 дней сетки и точные программы отчётного дня.</li><li><strong>Выберите аудиторию и период.</strong> Эти фильтры действуют во всех разделах.</li><li><strong>Сравните дни недели.</strong> Нажмите Пн–Вс, затем выберите даты с сеткой, чтобы наложить их эфирные профили.</li><li><strong>Откройте программу.</strong> В расписании, каталоге или сетке нажмите на передачу для просмотра выпусков, аудитории и удержания.</li></ol><p class="muted">Доля показывает часть аудитории среди смотревших ТВ; рейтинг — часть всей целевой группы. Для 25–34 в отчётах есть дневные метрики, но нет подробной сетки. Границы программ из недельной сетки приблизительные, с шагом 10 минут.</p><p class="muted">Импортированные данные сохраняются в этом браузере. Для работы с другого устройства нужно загрузить отчёты там.</p></dialog>
   <script type="module" src="./src/app.js"></script>
 </body>
 </html>
