@@ -49,6 +49,14 @@ test('report date falls back to C2, warns on conflicts and never falls back to f
   assert.throws(() => parseWorkbook(book), /дата не найдена/);
 });
 
+test('a malformed grid time warns and cannot silently shift measurements to another slot', () => {
+  const book = fixture(); book.Sheets['Сетка_FTV_каналы'].B6 = c('06:00 - 06:10');
+  const result = parseWorkbook(book);
+  assert.ok(result.warnings.some(w => w.includes('Неверный интервал слота')));
+  assert.equal(result.grid_10min.find(row => row.slotIndex === 0), undefined);
+  assert.equal(result.grid_10min.find(row => row.slotIndex === 1).channels['FTV (UZ/RU)'].share, 0);
+});
+
 test('real 06 October report: 60 dates, eight grids, exact night logs, scan and known Fresh news loss', { skip: !hasOctoberSample }, async () => {
   const path = readdirSync('samples').find(name => name.includes('06.10.26'));
   const report = await parseExcelFile(readFileSync(`samples/${path}`), { XLSX, JSZip });

@@ -5,6 +5,8 @@ import { DAYPARTS, FTV_CHANNEL } from './core/normalization.js';
 import { aggregatePeriod, comparePeriods, filterDailyRecords, audienceKey, mean } from './analytics/comparator.js';
 import { detectSlotDrops } from './analytics/dropDetector.js';
 import { buildProgramCatalog, filterPrograms, summarizePrograms, programAtSlot } from './analytics/programs.js';
+import { analyzeRecurrence } from './analytics/recurrence.js';
+import { renderRecurrence } from './ui/recurrenceView.js';
 import { renderDailyTrend, renderComparison, renderProgramTimeline, disposeCharts, disposeChart } from './ui/charts.js';
 import { renderGrid, renderPainPoints } from './ui/gridView.js';
 import { renderKPIs, renderProgramTable, renderProgramDetail } from './ui/programView.js';
@@ -17,12 +19,14 @@ let scanURL = null, scanKey = '', detailKey = '', pendingRender = false, exportR
 const cache = new Map();
 const seasons = { winter: 'Зима', spring: 'Весна', summer: 'Лето', autumn: 'Осень' };
 const preferenceFields = ['view', 'mode', 'audience', 'metric', 'chartView', 'selectedDayOfWeek', 'programLayout', 'programChannel', 'periodA', 'periodB'];
+preferenceFields.push('recurrenceMode', 'recurrenceTitle', 'recurrenceChannel', 'recurrenceStart', 'recurrenceEnd', 'recurrenceApproximate', 'recurrenceSignal', 'recurrenceRetention', 'recurrenceBaselineDrop');
 const pageCopy = {
   overview: ['Обзор', 'Эфир в цифрах', 'Общая картина аудитории и точки для дальнейшего анализа.'],
   comparison: ['Сравнение периодов', 'Сравнивайте сопоставимый эфир', 'Недели, дни недели, сезоны и годы — с понятной базой сравнения.'],
   programs: ['Программы', 'Что выходит в эфир', 'Расписание, показатели и история выпусков каждой программы.'],
   grid: ['Сетка вещания', 'Весь эфир на одной карте', 'Доля аудитории FTV и конкурентов в каждом десятиминутном слоте.'],
   drops: ['Провалы слотов', 'Где теряем аудиторию', 'Слабые стыки программ и одновременный рост конкурентов.'],
+  recurrence: ['Закономерности', 'Устойчивая проблема или аномалия?', 'Сравнивайте одну программу или одно время по одинаковым дням недели.'],
 };
 const options = s => ({ audience: s.audience, from: s.dateFrom, to: s.dateTo, excludeNonWorkdays: s.excludeNonWorkdays });
 function memo(key, compute) { if (!cache.has(key)) { if (cache.size >= 20) cache.delete(cache.keys().next().value); cache.set(key, compute()); } return cache.get(key); }
@@ -65,6 +69,13 @@ function chooseMode(mode) {
 }
 function navigate(view, patch = {}) { set({ view, selectedProgramId: null, ...patch }); history.replaceState(null, '', `#${view}`); }
 function openDate(dateISO) { if (dateISO) navigate('programs', { selectedDate: dateISO, programLayout: 'schedule', programPage: 1, programQuery: '' }); }
+function investigate(programId) {
+  const program = catalogById.get(programId); if (!program) return;
+  const dayOfWeek = new Date(`${program.dateISO}T00:00:00Z`).getUTCDay() || 7;
+  navigate('recurrence', { recurrenceMode: 'program', recurrenceTitle: program.title, recurrenceChannel: program.channel,
+    recurrenceStart: Math.max(18000, Math.floor(program.startSec / 600) * 600 - 1800),
+    recurrenceEnd: Math.min(104400, Math.ceil(program.startSec / 600) * 600 + 1800), selectedDayOfWeek: dayOfWeek });
+}
 
 async function reload() {
   data = await db.loadData(); catalog = buildProgramCatalog(data); catalogById = new Map(catalog.map(row => [row.id, row]));
@@ -72,8 +83,10 @@ async function reload() {
   const dates = new Set(data.daily_metrics.map(row => row.dateISO));
   const channels = [...new Set(catalog.map(row => row.channel))].sort((a, b) => a === FTV_CHANNEL ? -1 : b === FTV_CHANNEL ? 1 : a.localeCompare(b));
   $('program-channel').replaceChildren(new Option('Все каналы', 'all'), ...channels.map(channel => new Option(channel, channel)));
+  $('recurrence-channel').replaceChildren(...channels.map(channel => new Option(channel, channel)));
   const s = state.getState();
   set({ ...choosePeriods(s.mode), revision: s.revision + 1,
+    recurrenceTitle: s.recurrenceTitle || catalog.find(row => row.channel === s.recurrenceChannel && row.title.toLowerCase().includes('fresh news'))?.title || catalog.find(row => row.channel === s.recurrenceChannel)?.title || '',
     selectedDate: dates.has(s.selectedDate) ? s.selectedDate : catalog[0]?.dateISO ?? data.daily_metrics.at(-1)?.dateISO ?? null,
     programPage: 1, programChannel: channels.includes(s.programChannel) || s.programChannel === 'all' ? s.programChannel : channels[0] ?? FTV_CHANNEL });
 }
@@ -171,7 +184,7 @@ function renderComparisonView(s) {
 
 function renderPrograms(s) {
   syncButtons('[data-program-layout]', 'programLayout', s.programLayout);
-  if ($('program-search').value !== s.programQuery) $('program-search').value = s.programQuery;
+  if (!searchTimer && document.activeElement !== $('program-search') && $('program-search').value !== s.programQuery) $('program-search').value = s.programQuery;
   $('program-channel').value = s.programChannel; $('program-daypart').value = s.programDaypart; $('program-sort').value = s.programSort;
   const rows = filterPrograms(catalog, { ...options(s), workdays, query: s.programQuery, channel: s.programChannel, daypart: s.programDaypart, dateISO: s.programLayout === 'schedule' ? s.selectedDate : null });
   const grouped = s.programLayout === 'catalog', displayed = grouped ? summarizePrograms(rows) : [...rows];
@@ -205,6 +218,25 @@ function renderDrops(s) {
   exportRows = [['Дата', 'Программа', 'Начало', 'Доля %', 'Удержание входа %', 'Изменение доли', 'Триггеры'], ...rows.map(row => [row.program.dateISO, row.program.title, timeLabel(row.program.startSec), row.program.share, row.leadInRetention, row.deltaShare, row.triggers.join(', ')])];
 }
 
+function renderPatterns(s) {
+  syncButtons('[data-recurrence-mode]', 'recurrenceMode', s.recurrenceMode);
+  $('recurrence-title-label').hidden = s.recurrenceMode !== 'program';
+  $('recurrence-title').value = s.recurrenceTitle; $('recurrence-channel').value = s.recurrenceChannel;
+  $('recurrence-start').value = timeLabel(s.recurrenceStart); $('recurrence-end').value = timeLabel(s.recurrenceEnd);
+  $('recurrence-signal').value = s.recurrenceSignal; $('recurrence-retention').value = s.recurrenceRetention;
+  $('recurrence-baseline-drop').value = s.recurrenceBaselineDrop; $('recurrence-approximate').checked = s.recurrenceApproximate;
+  $('recurrence-retention').disabled = s.recurrenceSignal !== 'leadIn';
+  $('recurrence-mode-note').textContent = s.recurrenceMode === 'program' ? 'Выберите точное название и окно начала выпуска. Сравним полный выпуск и соседние программы в каждый выбранный день недели.' : 'Сравним один и тот же интервал, даже если передачи менялись. Показатель окна оценён по средним долям пересекающих его программ.';
+  const titles = [...new Set(catalog.filter(row => row.channel === s.recurrenceChannel && row.audience === s.audience).map(row => row.title))].sort((a, b) => a.localeCompare(b, 'ru'));
+  $('recurrence-titles').replaceChildren(...titles.map(title => new Option(title, title)));
+  $('recurrence-weekdays').innerHTML = WEEKDAYS.map((label, i) => `<button class="weekday-button ${s.selectedDayOfWeek === i + 1 ? 'active' : ''}" data-pattern-weekday="${i + 1}" aria-pressed="${s.selectedDayOfWeek === i + 1}" aria-label="Все ${WEEKDAY_NAMES[i]}"><strong>${label}</strong></button>`).join('');
+  const query = { ...options(s), mode: s.recurrenceMode, title: s.recurrenceTitle, channel: s.recurrenceChannel, dayOfWeek: s.selectedDayOfWeek,
+    startSec: s.recurrenceStart, endSec: s.recurrenceEnd, includeApproximate: s.recurrenceApproximate, signal: s.recurrenceSignal,
+    retentionThreshold: s.recurrenceRetention, baselineDropPercent: s.recurrenceBaselineDrop };
+  const result = memo(`patterns:${s.revision}:${JSON.stringify(query)}`, () => analyzeRecurrence(data, query));
+  exportRows = renderRecurrence(result, { onSelect: row => row.programId ? set({ selectedProgramId: row.programId }) : openDate(row.dateISO) });
+}
+
 function renderDetail(s) {
   const dialog = $('program-detail');
   if (!s.selectedProgramId) { if (dialog.open) dialog.close(); disposeChart($('program-history-chart')); detailKey = ''; return; }
@@ -217,7 +249,7 @@ function renderDetail(s) {
 }
 function render() {
   const s = state.getState(); renderShell(s);
-  if (data.daily_metrics.length) ({ overview: renderOverview, comparison: renderComparisonView, programs: renderPrograms, grid: renderGridView, drops: renderDrops })[s.view](s);
+  if (data.daily_metrics.length) ({ overview: renderOverview, comparison: renderComparisonView, programs: renderPrograms, grid: renderGridView, drops: renderDrops, recurrence: renderPatterns })[s.view](s);
   renderDetail(s);
 }
 function scheduleRender() { if (pendingRender) return; pendingRender = true; requestAnimationFrame(() => { pendingRender = false; try { render(); } catch (error) { console.error(error); $('status').textContent = error.message; $('status').className = 'status-line error'; } }); }
@@ -247,6 +279,9 @@ document.addEventListener('click', event => {
   else if (d.curve) set({ curveDates: s.curveDates.includes(d.curve) ? s.curveDates.filter(date => date !== d.curve) : [...s.curveDates, d.curve].slice(-6), chartView: 'slots' });
   else if (d.chartView) set({ chartView: d.chartView });
   else if (d.programLayout) set({ programLayout: d.programLayout, programPage: 1 });
+  else if (d.investigate) investigate(d.investigate);
+  else if (d.recurrenceMode) set({ recurrenceMode: d.recurrenceMode });
+  else if (d.patternWeekday) set({ selectedDayOfWeek: Number(d.patternWeekday) });
   else if (d.page) set({ programPage: Number(d.page) });
   else if (d.program) set({ selectedProgramId: d.program });
   else if (d.date) openDate(d.date);
@@ -267,10 +302,25 @@ $('swap-periods').addEventListener('click', () => { const s = state.getState(); 
 $('select-curves').addEventListener('click', () => set({ curveDates: availableCurveDates(state.getState()).slice(-6), chartView: 'slots' }));
 $('broadcast-date').addEventListener('change', event => set({ selectedDate: event.target.value, programPage: 1, selectedProgramId: null }));
 for (const [id, offset] of [['previous-date', 1], ['next-date', -1]]) $(id).addEventListener('click', () => { const dates = scopedDaily(state.getState()).map(row => row.dateISO).reverse(), index = dates.indexOf(state.getState().selectedDate); if (dates[index + offset]) set({ selectedDate: dates[index + offset], programPage: 1 }); });
-let searchTimer;
-$('program-search').addEventListener('input', event => { clearTimeout(searchTimer); const query = event.target.value; searchTimer = setTimeout(() => set({ programQuery: query, programPage: 1 }), 160); });
+let searchTimer = null;
+$('program-search').addEventListener('input', event => { clearTimeout(searchTimer); const query = event.target.value; searchTimer = setTimeout(() => { searchTimer = null; set({ programQuery: query, programPage: 1 }); }, 160); });
 for (const [id, key] of [['program-channel', 'programChannel'], ['program-daypart', 'programDaypart'], ['program-sort', 'programSort']]) $(id).addEventListener('change', event => set({ [key]: event.target.value, programPage: 1 }));
 $('program-daypart').append(...DAYPARTS.map(part => new Option(part.label, part.id)));
+function readPatternTime(id) {
+  const match = $(id).value.trim().match(/^(\d{1,2}):([0-5]\d)$/);
+  if (!match) throw new Error('Время указывается как ЧЧ:ММ (05:00–29:00)');
+  return Number(match[1]) * 3600 + Number(match[2]) * 60;
+}
+function applyPatternFields() {
+  try { set({ recurrenceTitle: $('recurrence-title').value.trim(), recurrenceStart: readPatternTime('recurrence-start'), recurrenceEnd: readPatternTime('recurrence-end') }); }
+  catch (error) { set({ error: error.message }); }
+}
+$('recurrence-apply').addEventListener('click', applyPatternFields);
+for (const id of ['recurrence-title', 'recurrence-start', 'recurrence-end']) $(id).addEventListener('keydown', event => { if (event.key === 'Enter') applyPatternFields(); });
+$('recurrence-channel').addEventListener('change', event => set({ recurrenceChannel: event.target.value, recurrenceTitle: catalog.find(row => row.channel === event.target.value)?.title ?? '' }));
+$('recurrence-signal').addEventListener('change', event => set({ recurrenceSignal: event.target.value }));
+$('recurrence-approximate').addEventListener('change', event => set({ recurrenceApproximate: event.target.checked }));
+for (const [id, key] of [['recurrence-retention', 'recurrenceRetention'], ['recurrence-baseline-drop', 'recurrenceBaselineDrop']]) $(id).addEventListener('change', event => set({ [key]: Number(event.target.value) }));
 $('close-program').addEventListener('click', () => set({ selectedProgramId: null }));
 $('program-detail').addEventListener('close', () => { if (state.getState().selectedProgramId) set({ selectedProgramId: null }); });
 $('help').addEventListener('click', () => $('help-dialog').showModal()); $('close-help').addEventListener('click', () => $('help-dialog').close());

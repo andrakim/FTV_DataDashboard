@@ -10,6 +10,9 @@ export const INITIAL_STATE = Object.freeze({
   programLayout: 'schedule', programQuery: '', programChannel: 'FTV (UZ/RU)',
   programDaypart: 'all', programSort: 'time', programPage: 1, selectedProgramId: null,
   dropRange: 'day',
+  recurrenceMode: 'program', recurrenceTitle: '', recurrenceChannel: 'FTV (UZ/RU)',
+  recurrenceStart: 64800, recurrenceEnd: 72000, recurrenceApproximate: false,
+  recurrenceSignal: 'leadIn', recurrenceRetention: 70, recurrenceBaselineDrop: 20,
 });
 
 function freeze(value) {
@@ -21,19 +24,22 @@ function validate(value) {
   if (!MODES.includes(value.mode)) throw new Error('Неизвестный режим сравнения');
   if (!AUDIENCES.includes(value.audience)) throw new Error('Неизвестная аудитория');
   for (const [key, allowed] of Object.entries({
-    view: ['overview', 'comparison', 'programs', 'grid', 'drops'], metric: ['share', 'rtg', 'reach', 'atsMin'],
+    view: ['overview', 'comparison', 'programs', 'grid', 'drops', 'recurrence'], metric: ['share', 'rtg', 'reach', 'atsMin'],
     chartView: ['daily', 'slots', 'dayparts'], programLayout: ['schedule', 'catalog'],
     programDaypart: ['all', 'earlyMorning', 'morning', 'daytime', 'earlyFringe', 'primeTime', 'lateNight'],
     programSort: ['time', 'share', 'title'], dropRange: ['day', 'period'],
+    recurrenceMode: ['program', 'slot'], recurrenceSignal: ['leadIn', 'baseline'],
   })) if (!allowed.includes(value[key])) throw new Error(`Некорректное поле ${key}`);
   if (!Array.isArray(value.curveDates)) throw new Error('Ожидался массив дат');
   value.curveDates.forEach(assertDateISO);
   if (!Number.isInteger(value.programPage) || value.programPage < 1) throw new Error('Некорректная страница');
-  for (const key of ['programQuery', 'programChannel']) if (typeof value[key] !== 'string') throw new Error(`Некорректное поле ${key}`);
+  for (const key of ['programQuery', 'programChannel', 'recurrenceTitle', 'recurrenceChannel']) if (typeof value[key] !== 'string') throw new Error(`Некорректное поле ${key}`);
+  if (![value.recurrenceStart, value.recurrenceEnd].every(Number.isFinite) || value.recurrenceStart < 18000 || value.recurrenceEnd > 104400 || value.recurrenceEnd <= value.recurrenceStart) throw new Error('Задайте интервал от 05:00 до 29:00; конец позже начала');
+  for (const key of ['recurrenceRetention', 'recurrenceBaselineDrop']) if (!Number.isFinite(value[key]) || value[key] <= 0 || value[key] > 100) throw new Error('Порог должен быть больше 0 и не больше 100');
   if (!Number.isInteger(value.selectedDayOfWeek) || value.selectedDayOfWeek < 1 || value.selectedDayOfWeek > 7) throw new Error('День недели должен быть от 1 до 7');
   for (const key of ['dateFrom', 'dateTo', 'selectedDate']) if (value[key] != null) assertDateISO(value[key]);
   if (value.dateFrom && value.dateTo && value.dateFrom > value.dateTo) throw new Error('Начало периода позже конца');
-  for (const key of ['excludeNonWorkdays', 'busy']) if (typeof value[key] !== 'boolean') throw new Error(`${key} должен быть boolean`);
+  for (const key of ['excludeNonWorkdays', 'busy', 'recurrenceApproximate']) if (typeof value[key] !== 'boolean') throw new Error(`${key} должен быть boolean`);
 }
 
 export function createStore(initial = {}) {

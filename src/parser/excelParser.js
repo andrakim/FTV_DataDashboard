@@ -109,10 +109,14 @@ export function parseWorkbook(workbook, { preserveAdditionalSheets = true } = {}
     for (let r = 5; r <= 148; r++) {
       const slotIndex = r - 5, expectedStart = BROADCAST_START + slotIndex * SLOT_SECONDS;
       const interval = cell(sheet, r, 1);
+      let validInterval = true;
       if (interval != null) safe(name, r + 1, () => {
         const match = String(interval).match(/^\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–—]\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*$/);
-        if (!match || parseBroadcastTime(match[1]).totalSeconds !== expectedStart || parseBroadcastTime(match[2]).totalSeconds !== expectedStart + SLOT_SECONDS) throw new Error(`Неверный интервал слота: ${interval}`);
+        try {
+          if (!match || parseBroadcastTime(match[1]).totalSeconds !== expectedStart || parseBroadcastTime(match[2]).totalSeconds !== expectedStart + SLOT_SECONDS) throw new Error();
+        } catch { validInterval = false; throw new Error(`Неверный интервал слота: ${interval}`); }
       });
+      if (!validInterval) continue;
       for (const { c, dateISO, channel } of columns) {
         const id = `${dateISO}_${slotIndex}`;
         const parsed = parseProgramCell(cell(sheet, r, c));

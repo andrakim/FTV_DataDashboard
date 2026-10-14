@@ -1,5 +1,6 @@
 import { DAYPARTS, FTV_CHANNEL, normalizeChannel, BROADCAST_START, BROADCAST_END, SLOT_SECONDS } from '../core/normalization.js';
 import { buildDaypartProfile, channelMetrics, audienceKey, weightedMean } from './comparator.js';
+import { measureWindow } from './intervals.js';
 
 const finite = value => typeof value === 'number' && Number.isFinite(value);
 const overlap = (start, end, row) => Math.max(0, Math.min(end, row.endSec) - Math.max(start, row.startSec));
@@ -21,21 +22,13 @@ export function demographicLoss(previous, current) {
 }
 
 function windowShare(rows, startSec, endSec) {
-  // Sweep disjoint intervals: duplicate or overlapping program rows must not double-count time.
-  const relevant = rows.filter(row => overlap(startSec, endSec, row) > 0 && finite(row.share));
-  const points = [...new Set([startSec, endSec, ...relevant.flatMap(row => [Math.max(startSec, row.startSec), Math.min(endSec, row.endSec)])])].sort((a, b) => a - b);
-  const samples = [];
-  for (let i = 0; i < points.length - 1; i++) {
-    const start = points[i], end = points[i + 1];
-    const row = relevant.filter(row => row.startSec <= start && row.endSec >= end).sort((a, b) => b.startSec - a.startSec)[0];
-    if (row) samples.push({ value: row.share, weight: end - start });
-  }
-  return { share: weightedMean(samples), coverageSeconds: samples.reduce((sum, row) => sum + row.weight, 0),
-    programs: [...new Set(relevant.map(row => row.title).filter(Boolean))] };
+  const result = measureWindow(rows, startSec, endSec);
+  return { ...result, share: result.value };
 }
 
-export function attributeCompetitors(program, data, { audience = '18-54', channel = FTV_CHANNEL } = {}) {
+export function attributeCompetitors(program, data, { audience = '18-54', channel = FTV_CHANNEL, includeNonGrowing = false, minimumCoverage = 0.9 } = {}) {
   audienceKey(audience);
+  if (!finite(minimumCoverage) || minimumCoverage <= 0 || minimumCoverage > 1) throw new Error('Некорректное покрытие конкурентов');
   const ftv = normalizeChannel(channel), dateISO = program.dateISO;
   const currentStart = program.startSec, currentEnd = program.endSec;
   // Previous ten-minute slot anchored to 05:00; a boundary inside a slot uses its preceding complete slot.
@@ -66,18 +59,18 @@ export function attributeCompetitors(program, data, { audience = '18-54', channe
     const programRows = logsByChannel.get(competitor) ?? [];
     // Prefer exact program boundaries. Use a consistent source for both windows.
     const exactBefore = windowShare(programRows, previousStart, previousEnd), exactDuring = windowShare(programRows, currentStart, currentEnd);
-    const useLogs = exactBefore.coverageSeconds === SLOT_SECONDS && exactDuring.coverageSeconds >= (currentEnd - currentStart) * 0.9;
+    const useLogs = exactBefore.coverageFraction >= minimumCoverage && exactDuring.coverageFraction >= minimumCoverage && !exactBefore.conflictSeconds && !exactDuring.conflictSeconds;
     const before = useLogs ? exactBefore : windowShare(gridRows, previousStart, previousEnd);
     const during = useLogs ? exactDuring : windowShare(gridRows, currentStart, currentEnd);
-    if (!finite(before.share) || !finite(during.share)) continue;
+    if (!finite(before.share) || !finite(during.share) || before.coverageFraction < minimumCoverage || during.coverageFraction < minimumCoverage || before.conflictSeconds || during.conflictSeconds) continue;
     const deltaShare = during.share - before.share;
-    if (deltaShare <= 0) continue;
+    if (!includeNonGrowing && deltaShare <= 0) continue;
     candidates.push({ channel: normalizeChannel(competitor), previousShare: before.share, currentShare: during.share, deltaShare,
       relativePercent: before.share > 0 ? deltaShare / before.share * 100 : null,
       source: useLogs ? 'program_logs' : 'grid_10min',
       coverageFraction: during.coverageSeconds / (currentEnd - currentStart),
       previousCoverageFraction: before.coverageSeconds / SLOT_SECONDS,
-      programs: exactDuring.programs.length ? exactDuring.programs : during.programs,
+      programs: during.programs,
       window: { startSec: currentStart, endSec: currentEnd, previousStartSec: previousStart, previousEndSec: previousEnd },
     });
   }

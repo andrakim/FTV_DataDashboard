@@ -2,23 +2,27 @@ import { BROADCAST_START, SLOT_SECONDS, DAYPARTS, normalizeChannel } from '../co
 import { weightedMean, mean } from './comparator.js';
 
 export function buildProgramCatalog(data) {
-  const exactDays = new Set();
+  const exactIntervals = new Map();
   const exact = new Map();
   for (const row of data.program_logs ?? []) {
     if (!(row.endSec > row.startSec) || !row.title) continue;
     const channel = normalizeChannel(row.channel), id = row.id ?? `${row.dateISO}_${channel}_${row.startSec}`;
-    exactDays.add(`${row.dateISO}_${channel}`);
+    const key = `${row.dateISO}_${channel}_${row.audience ?? '18-54'}`;
+    if (!exactIntervals.has(key)) exactIntervals.set(key, []);
+    exactIntervals.get(key).push(row);
     exact.set(id, { id, dateISO: row.dateISO, channel, title: row.title, startSec: row.startSec, endSec: row.endSec,
       durationMin: (row.endSec - row.startSec) / 60, share: row.share ?? null, rtg: row.rtg ?? null,
       audience: row.audience ?? '18-54', demographics: row.demographics ?? null, source: 'program_logs', approximate: false });
   }
   const groups = new Map();
   for (const slot of data.grid_10min ?? []) for (const [name, metrics] of Object.entries(slot.channels ?? {})) {
-    const channel = normalizeChannel(name), key = `${slot.dateISO}_${channel}`;
-    if (exactDays.has(key) || !metrics.title) continue;
-    if (!groups.has(key)) groups.set(key, []);
+    const channel = normalizeChannel(name), key = `${slot.dateISO}_${channel}_${metrics.audience ?? '18-54'}`;
+    if (!metrics.title) continue;
     const startSec = slot.startSec ?? BROADCAST_START + slot.slotIndex * SLOT_SECONDS;
-    groups.get(key).push({ ...metrics, dateISO: slot.dateISO, channel, startSec, endSec: slot.endSec ?? startSec + SLOT_SECONDS });
+    const endSec = slot.endSec ?? startSec + SLOT_SECONDS;
+    if ((exactIntervals.get(key) ?? []).some(row => row.startSec < endSec && row.endSec > startSec)) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ ...metrics, dateISO: slot.dateISO, channel, startSec, endSec });
   }
   const derived = [];
   for (const slots of groups.values()) {
@@ -71,7 +75,7 @@ export function summarizePrograms(rows) {
 }
 
 export function programNeighbors(catalog, program) {
-  const rows = catalog.filter(row => row.dateISO === program.dateISO && row.channel === program.channel).sort((a, b) => a.startSec - b.startSec);
+  const rows = catalog.filter(row => row.dateISO === program.dateISO && row.channel === program.channel && row.audience === program.audience).sort((a, b) => a.startSec - b.startSec);
   const index = rows.findIndex(row => row.id === program.id);
   const previous = rows[index - 1], next = rows[index + 1];
   const adjacent = (a, b) => a && b && b.startSec >= a.endSec && b.startSec - a.endSec <= 600;
