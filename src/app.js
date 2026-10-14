@@ -7,6 +7,8 @@ import { detectSlotDrops } from './analytics/dropDetector.js';
 import { buildProgramCatalog, filterPrograms, summarizePrograms, programAtSlot } from './analytics/programs.js';
 import { analyzeRecurrence } from './analytics/recurrence.js';
 import { renderRecurrence } from './ui/recurrenceView.js';
+import { createAiringIndex, filterAirings, describeAiring, airingCalendarDays, programmeKey, weekdayOf } from './analytics/airingExplorer.js';
+import { renderAiringBrowser, renderAiringComparison, airingsCSV } from './ui/airingView.js';
 import { renderDailyTrend, renderComparison, renderProgramTimeline, disposeCharts, disposeChart } from './ui/charts.js';
 import { renderGrid, renderPainPoints } from './ui/gridView.js';
 import { renderKPIs, renderProgramTable, renderProgramDetail } from './ui/programView.js';
@@ -15,15 +17,17 @@ import { escapeHTML as e, number, dateLabel, timeLabel, WEEKDAYS, WEEKDAY_NAMES,
 const $ = id => document.getElementById(id);
 const importer = createImportClient();
 let data = { daily_metrics: [], grid_10min: [], program_logs: [] }, catalog = [], workdays = new Map(), catalogById = new Map();
+let airingIndex, visibleAirings = [], comparisonExportRows = [];
 let scanURL = null, scanKey = '', detailKey = '', pendingRender = false, exportRows = [], dropsLimit = 20;
 const cache = new Map();
 const seasons = { winter: 'Зима', spring: 'Весна', summer: 'Лето', autumn: 'Осень' };
 const preferenceFields = ['view', 'mode', 'audience', 'metric', 'chartView', 'selectedDayOfWeek', 'programLayout', 'programChannel', 'periodA', 'periodB'];
 preferenceFields.push('recurrenceMode', 'recurrenceTitle', 'recurrenceChannel', 'recurrenceStart', 'recurrenceEnd', 'recurrenceApproximate', 'recurrenceSignal', 'recurrenceRetention', 'recurrenceBaselineDrop');
+preferenceFields.push('programTitle', 'programStart', 'programEnd', 'programWeekday', 'programApproximate', 'programMissingDays', 'programCompetitors');
 const pageCopy = {
   overview: ['Обзор', 'Эфир в цифрах', 'Общая картина аудитории и точки для дальнейшего анализа.'],
   comparison: ['Сравнение периодов', 'Сравнивайте сопоставимый эфир', 'Недели, дни недели, сезоны и годы — с понятной базой сравнения.'],
-  programs: ['Программы', 'Что выходит в эфир', 'Расписание, показатели и история выпусков каждой программы.'],
+  programs: ['Программы', 'Все выходы одной программы', 'Выберите программу и свои часы. Просматривайте эфир, затем отмечайте выходы для сравнения.'],
   grid: ['Сетка вещания', 'Весь эфир на одной карте', 'Доля аудитории FTV и конкурентов в каждом десятиминутном слоте.'],
   drops: ['Провалы слотов', 'Где теряем аудиторию', 'Слабые стыки программ и одновременный рост конкурентов.'],
   recurrence: ['Закономерности', 'Устойчивая проблема или аномалия?', 'Сравнивайте одну программу или одно время по одинаковым дням недели.'],
@@ -60,7 +64,7 @@ function updateScope(patch) {
   const next = { ...state.getState(), ...patch }, days = filterDailyRecords(data.daily_metrics, options(next));
   const dates = new Set(days.map(row => row.dateISO));
   const selectedDate = dates.has(next.selectedDate) ? next.selectedDate : catalog.find(row => dates.has(row.dateISO))?.dateISO ?? days.at(-1)?.dateISO ?? null;
-  set({ ...patch, selectedDate, programPage: 1, selectedProgramId: null, curveDates: availableCurveDates(next).slice(-6) });
+  set({ ...patch, selectedDate, programPage: 1, selectedProgramId: null, ...(patch.audience ? { programSelectedIds: [], programCompareOpen: false } : {}), curveDates: availableCurveDates(next).slice(-6) });
   } catch (error) { set({ error: error.message }); }
 }
 function chooseMode(mode) {
@@ -69,6 +73,11 @@ function chooseMode(mode) {
 }
 function navigate(view, patch = {}) { set({ view, selectedProgramId: null, ...patch }); history.replaceState(null, '', `#${view}`); }
 function openDate(dateISO) { if (dateISO) navigate('programs', { selectedDate: dateISO, programLayout: 'schedule', programPage: 1, programQuery: '' }); }
+function browseProgram(programId) {
+  const program = catalogById.get(programId); if (!program) return;
+  navigate('programs', { programLayout: 'calendar', programTitle: program.title, programChannel: program.channel,
+    programStart: 18000, programEnd: 104400, programWeekday: 0, programPage: 1, programSelectedIds: [], programCompareOpen: false });
+}
 function investigate(programId) {
   const program = catalogById.get(programId); if (!program) return;
   const dayOfWeek = new Date(`${program.dateISO}T00:00:00Z`).getUTCDay() || 7;
@@ -79,13 +88,17 @@ function investigate(programId) {
 
 async function reload() {
   data = await db.loadData(); catalog = buildProgramCatalog(data); catalogById = new Map(catalog.map(row => [row.id, row]));
+  airingIndex = createAiringIndex(catalog, data);
   workdays = new Map(data.daily_metrics.map(row => [row.dateISO, row.isWorkday])); cache.clear();
   const dates = new Set(data.daily_metrics.map(row => row.dateISO));
   const channels = [...new Set(catalog.map(row => row.channel))].sort((a, b) => a === FTV_CHANNEL ? -1 : b === FTV_CHANNEL ? 1 : a.localeCompare(b));
   $('program-channel').replaceChildren(new Option('Все каналы', 'all'), ...channels.map(channel => new Option(channel, channel)));
+  $('airing-channel').replaceChildren(...channels.map(channel => new Option(channel, channel)));
   $('recurrence-channel').replaceChildren(...channels.map(channel => new Option(channel, channel)));
   const s = state.getState();
   set({ ...choosePeriods(s.mode), revision: s.revision + 1,
+    programTitle: s.programTitle || catalog.find(row => row.channel === s.programChannel && row.title.toLowerCase().includes('fresh news'))?.title || catalog.find(row => row.channel === s.programChannel)?.title || '',
+    programSelectedIds: s.programSelectedIds.filter(id => catalogById.has(id)),
     recurrenceTitle: s.recurrenceTitle || catalog.find(row => row.channel === s.recurrenceChannel && row.title.toLowerCase().includes('fresh news'))?.title || catalog.find(row => row.channel === s.recurrenceChannel)?.title || '',
     selectedDate: dates.has(s.selectedDate) ? s.selectedDate : catalog[0]?.dateISO ?? data.daily_metrics.at(-1)?.dateISO ?? null,
     programPage: 1, programChannel: channels.includes(s.programChannel) || s.programChannel === 'all' ? s.programChannel : channels[0] ?? FTV_CHANNEL });
@@ -184,6 +197,11 @@ function renderComparisonView(s) {
 
 function renderPrograms(s) {
   syncButtons('[data-program-layout]', 'programLayout', s.programLayout);
+  const explorer = ['calendar', 'airings'].includes(s.programLayout);
+  $('airing-controls').hidden = !explorer; $('legacy-program-controls').hidden = explorer;
+  $('legacy-program-table').hidden = explorer; $('airing-browser').hidden = !explorer;
+  if (explorer) { $('program-timeline').hidden = true; renderExplorer(s); return; }
+  $('airing-selection').hidden = true; $('airing-comparison').hidden = true;
   if (!searchTimer && document.activeElement !== $('program-search') && $('program-search').value !== s.programQuery) $('program-search').value = s.programQuery;
   $('program-channel').value = s.programChannel; $('program-daypart').value = s.programDaypart; $('program-sort').value = s.programSort;
   const rows = filterPrograms(catalog, { ...options(s), workdays, query: s.programQuery, channel: s.programChannel, daypart: s.programDaypart, dateISO: s.programLayout === 'schedule' ? s.selectedDate : null });
@@ -196,6 +214,45 @@ function renderPrograms(s) {
   const pages = renderProgramTable($('program-table'), displayed, { catalog: grouped, page: s.programPage });
   $('program-pagination').innerHTML = `<span>${pages.from}–${pages.to} из ${displayed.length}</span><div><button class="button secondary" data-page="${pages.page - 1}" ${pages.page <= 1 ? 'disabled' : ''}>←</button><span>Страница ${pages.page} / ${pages.pages}</span><button class="button secondary" data-page="${pages.page + 1}" ${pages.page >= pages.pages ? 'disabled' : ''}>→</button></div>`;
   exportRows = [['Дата', 'Начало', 'Конец', 'Канал', 'Программа', 'Доля %', 'Рейтинг %', 'Длительность мин', 'Источник'], ...rows.map(row => [row.dateISO, timeLabel(row.startSec), timeLabel(row.endSec), row.channel, row.title, row.share, row.rtg, row.durationMin, row.source])];
+}
+
+function renderExplorer(s) {
+  const channel = s.programChannel === 'all' ? FTV_CHANNEL : s.programChannel;
+  const titles = [...new Map(catalog.filter(row => row.channel === channel && row.audience === s.audience).map(row => [programmeKey(row.title), row.title])).values()].sort((a, b) => a.localeCompare(b, 'ru'));
+  $('airing-titles').replaceChildren(...titles.map(title => new Option(title, title)));
+  for (const [id, value] of [['airing-title', s.programTitle], ['airing-start', timeLabel(s.programStart)], ['airing-end', timeLabel(s.programEnd)]]) if (document.activeElement !== $(id)) $(id).value = value;
+  $('airing-channel').value = channel; $('airing-approximate').checked = s.programApproximate; $('airing-missing-days').checked = s.programMissingDays;
+  const query = { ...options(s), channel, title: s.programTitle, workdays, startSec: s.programStart, endSec: s.programEnd, dayOfWeek: s.programWeekday, includeApproximate: s.programApproximate };
+  const key = `airings:${scopeKey(s)}:${JSON.stringify([channel, s.programTitle, s.programStart, s.programEnd, s.programWeekday, s.programApproximate])}`;
+  const rows = memo(key, () => filterAirings(catalog, query)); visibleAirings = rows;
+  const family = memo(`family:${scopeKey(s)}:${JSON.stringify([channel, s.programTitle, s.programApproximate])}`, () => filterAirings(catalog, { ...query, startSec: 18000, endSec: 104400, dayOfWeek: 0 }));
+  const hours = [...new Set(family.map(row => Math.floor(row.startSec / 3600)))].sort((a, b) => a - b);
+  $('airing-time-bands').innerHTML = hours.map(hour => `<button data-airing-hour="${hour}" class="date-chip ${s.programStart === hour * 3600 && s.programEnd === (hour + 1) * 3600 ? 'active' : ''}">${String(hour).padStart(2, '0')}:00–${String(hour + 1).padStart(2, '0')}:00 · ${family.filter(row => Math.floor(row.startSec / 3600) === hour).length} выходов</button>`).join('');
+  const matchingWindow = memo(`${key}:weekdays`, () => filterAirings(catalog, { ...query, dayOfWeek: 0 }));
+  $('airing-weekdays').innerHTML = ['Все дни', ...WEEKDAYS].map((label, i) => `<button data-airing-weekday="${i}" class="${s.programWeekday === i ? 'active' : ''}" aria-pressed="${s.programWeekday === i}">${label}<small>${i === 0 ? matchingWindow.length : matchingWindow.filter(row => weekdayOf(row.dateISO) === i).length}</small></button>`).join('');
+  const presets = { all: [18000, 104400], day: [39600, 61200], evening: [64800, 82800], night: [82800, 104400] };
+  document.querySelectorAll('[data-airing-window]').forEach(button => button.classList.toggle('active', presets[button.dataset.airingWindow][0] === s.programStart && presets[button.dataset.airingWindow][1] === s.programEnd));
+  const competitors = [...new Set(catalog.filter(row => row.channel !== channel && row.audience === s.audience).map(row => row.channel))].sort((a, b) => Number(s.programCompetitors.includes(b)) - Number(s.programCompetitors.includes(a)) || a.localeCompare(b, 'ru'));
+  $('airing-competitor-choices').innerHTML = competitors.map(name => `<label><input type="checkbox" data-airing-competitor="${e(name)}" ${s.programCompetitors.includes(name) ? 'checked' : ''}>${e(name)}</label>`).join('');
+  const contexts = memo(`${key}:context:${JSON.stringify(s.programCompetitors)}`, () => rows.map(row => describeAiring(airingIndex, row, { competitors: s.programCompetitors })));
+  const days = memo(`${key}:days:${s.programMissingDays}`, () => airingCalendarDays(airingIndex, rows, { ...query, showMissing: s.programMissingDays }));
+  $('program-count').textContent = `${rows.length} выходов · ${new Set(rows.map(row => row.dateISO)).size} дней`;
+  $('program-note').textContent = s.audience === '25-34' ? 'Для 25–34 в этих отчётах нет программных измерений. Выберите 18–54 для просмотра выходов.' : `${s.programTitle || 'Выберите программу'} · начало в ${timeLabel(s.programStart)}–${timeLabel(s.programEnd)} · каждый выход показан отдельно. ≈ означает приблизительные границы, а не признак повтора.`;
+  const pages = renderAiringBrowser($('airing-browser'), { contexts, days, layout: s.programLayout, page: s.programPage, selectedIds: s.programSelectedIds, startSec: s.programStart, endSec: s.programEnd });
+  $('program-pagination').innerHTML = `<span>${pages.from}–${pages.to} из ${pages.total} ${s.programLayout === 'calendar' ? 'дней' : 'выходов'}</span><div><button class="button secondary" data-page="${pages.page - 1}" ${pages.page <= 1 ? 'disabled' : ''}>←</button><span>${pages.page} / ${pages.pages}</span><button class="button secondary" data-page="${pages.page + 1}" ${pages.page >= pages.pages ? 'disabled' : ''}>→</button></div>`;
+  const selected = s.programSelectedIds.map(id => catalogById.get(id)).filter(row => row && row.audience === s.audience && row.channel === channel && programmeKey(row.title) === programmeKey(s.programTitle));
+  const hiddenCount = selected.filter(row => !rows.some(item => item.id === row.id)).length;
+  $('airing-selection').hidden = !rows.length && !selected.length;
+  $('airing-selection').classList.toggle('empty', selected.length === 0);
+  $('airing-selection-count').textContent = `Отмечено ${selected.length} выходов${hiddenCount ? ` · ${hiddenCount} скрыты текущими фильтрами` : ''}`;
+  $('airing-build-comparison').disabled = selected.length < 2; $('airing-select-visible').disabled = !rows.length;
+  $('airing-comparison').hidden = !s.programCompareOpen || selected.length < 2;
+  if (!$('airing-comparison').hidden) {
+    $('airing-group-by').value = s.programGroupBy; syncButtons('[data-airing-metric]', 'airingMetric', s.programCompareMetric);
+    const selectedContexts = selected.map(row => describeAiring(airingIndex, row));
+    comparisonExportRows = renderAiringComparison(selectedContexts, { groupBy: s.programGroupBy, metric: s.programCompareMetric });
+  } else disposeChart($('airing-comparison-chart'));
+  exportRows = airingsCSV(contexts);
 }
 
 function renderGridView(s) {
@@ -256,15 +313,15 @@ function scheduleRender() { if (pendingRender) return; pendingRender = true; req
 state.subscribe((next, previous) => {
   const changed = Object.keys(next).filter(key => next[key] !== previous[key]);
   if (changed.some(key => preferenceFields.includes(key))) {
-    try { localStorage.setItem('FTV_Analytics_Preferences', JSON.stringify(Object.fromEntries(preferenceFields.map(key => [key, next[key]])))); } catch {}
+    try { localStorage.setItem('FTV_Analytics_Preferences', JSON.stringify({ schemaVersion: 2, ...Object.fromEntries(preferenceFields.map(key => [key, next[key]])) })); } catch {}
   }
   if (next.busy && changed.every(key => ['busy', 'error', 'importProgress'].includes(key))) renderStatus(); else scheduleRender();
 });
 
 document.addEventListener('click', event => {
-  const button = event.target.closest('button, tr[data-program], tr[data-date], .brand'); if (!button || button.disabled) return;
+  const button = event.target.closest('button, tr[data-program], tr[data-family], tr[data-date], .brand'); if (!button || button.disabled) return;
   const d = button.dataset, s = state.getState();
-  if (button.classList.contains('brand')) { event.preventDefault(); navigate('overview'); }
+  if (button.classList.contains('brand')) { event.preventDefault(); navigate('programs'); }
   else if ('upload' in d) $('files').click();
   else if (d.view) navigate(d.view);
   else if (d.go) { if (d.mode) chooseMode(d.mode); navigate(d.go); }
@@ -278,7 +335,13 @@ document.addEventListener('click', event => {
   else if (d.weekday) { const next = { ...s, selectedDayOfWeek: Number(d.weekday) }; set({ selectedDayOfWeek: next.selectedDayOfWeek, curveDates: availableCurveDates(next).slice(-6) }); }
   else if (d.curve) set({ curveDates: s.curveDates.includes(d.curve) ? s.curveDates.filter(date => date !== d.curve) : [...s.curveDates, d.curve].slice(-6), chartView: 'slots' });
   else if (d.chartView) set({ chartView: d.chartView });
-  else if (d.programLayout) set({ programLayout: d.programLayout, programPage: 1 });
+  else if (d.programLayout) set({ programLayout: d.programLayout, programPage: 1, ...(s.programChannel === 'all' && ['calendar', 'airings'].includes(d.programLayout) ? { programChannel: FTV_CHANNEL } : {}) });
+  else if (d.family) browseProgram(d.family);
+  else if (d.airingWindow) { const range = { all: [18000, 104400], day: [39600, 61200], evening: [64800, 82800], night: [82800, 104400] }[d.airingWindow]; set({ programStart: range[0], programEnd: range[1], programPage: 1 }); }
+  else if (d.airingHour) set({ programStart: Number(d.airingHour) * 3600, programEnd: (Number(d.airingHour) + 1) * 3600, programPage: 1 });
+  else if (d.airingWeekday) set({ programWeekday: Number(d.airingWeekday), programPage: 1 });
+  else if (d.airingMetric) set({ programCompareMetric: d.airingMetric });
+  else if (d.airingFocus) { const card = document.getElementById(`airing-card-${d.airingFocus}`); card?.scrollIntoView({ block: 'center', behavior: 'smooth' }); card?.focus({ preventScroll: true }); }
   else if (d.investigate) investigate(d.investigate);
   else if (d.recurrenceMode) set({ recurrenceMode: d.recurrenceMode });
   else if (d.patternWeekday) set({ selectedDayOfWeek: Number(d.patternWeekday) });
@@ -289,7 +352,7 @@ document.addEventListener('click', event => {
   else if ('moreDrops' in d) { dropsLimit += 20; scheduleRender(); }
 });
 document.addEventListener('keydown', event => {
-  if (event.target.matches('tr[data-program], tr[data-date]') && ['Enter', ' '].includes(event.key)) { event.preventDefault(); event.target.click(); }
+  if (event.target.matches('tr[data-program], tr[data-family], tr[data-date]') && ['Enter', ' '].includes(event.key)) { event.preventDefault(); event.target.click(); }
   if (event.target.matches('.weekday-button, .segmented button') && ['ArrowRight', 'ArrowLeft'].includes(event.key)) {
     const buttons = [...event.target.parentElement.querySelectorAll('button:not(:disabled)')], index = buttons.indexOf(event.target), next = buttons[(index + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length];
     event.preventDefault(); next.focus(); next.click();
@@ -306,6 +369,28 @@ let searchTimer = null;
 $('program-search').addEventListener('input', event => { clearTimeout(searchTimer); const query = event.target.value; searchTimer = setTimeout(() => { searchTimer = null; set({ programQuery: query, programPage: 1 }); }, 160); });
 for (const [id, key] of [['program-channel', 'programChannel'], ['program-daypart', 'programDaypart'], ['program-sort', 'programSort']]) $(id).addEventListener('change', event => set({ [key]: event.target.value, programPage: 1 }));
 $('program-daypart').append(...DAYPARTS.map(part => new Option(part.label, part.id)));
+function applyAiringFields() {
+  try {
+    const s = state.getState(), title = $('airing-title').value.trim(), changed = programmeKey(title) !== programmeKey(s.programTitle);
+    set({ programTitle: title, programStart: readPatternTime('airing-start'), programEnd: readPatternTime('airing-end'), programPage: 1,
+      ...(changed ? { programSelectedIds: [], programCompareOpen: false } : {}) });
+  } catch (error) { set({ error: error.message }); }
+}
+$('airing-apply').addEventListener('click', applyAiringFields);
+for (const id of ['airing-title', 'airing-start', 'airing-end']) $(id).addEventListener('keydown', event => { if (event.key === 'Enter') applyAiringFields(); });
+$('airing-channel').addEventListener('change', event => set({ programChannel: event.target.value, programTitle: catalog.find(row => row.channel === event.target.value && row.title.toLowerCase().includes('fresh news'))?.title || catalog.find(row => row.channel === event.target.value)?.title || '', programSelectedIds: [], programCompareOpen: false, programPage: 1 }));
+for (const [id, field] of [['airing-approximate', 'programApproximate'], ['airing-missing-days', 'programMissingDays']]) $(id).addEventListener('change', event => set({ [field]: event.target.checked, programPage: 1 }));
+document.addEventListener('change', event => {
+  const s = state.getState(), d = event.target.dataset;
+  if (d.airingSelect) set({ programSelectedIds: event.target.checked ? [...new Set([...s.programSelectedIds, d.airingSelect])] : s.programSelectedIds.filter(id => id !== d.airingSelect), programCompareOpen: false });
+  if (d.airingCompetitor) set({ programCompetitors: event.target.checked ? [...new Set([...s.programCompetitors, d.airingCompetitor])] : s.programCompetitors.filter(name => name !== d.airingCompetitor) });
+});
+$('airing-select-visible').addEventListener('click', () => set({ programSelectedIds: [...new Set([...state.getState().programSelectedIds, ...visibleAirings.map(row => row.id)])], programCompareOpen: false }));
+$('airing-clear-selection').addEventListener('click', () => set({ programSelectedIds: [], programCompareOpen: false }));
+$('airing-build-comparison').addEventListener('click', () => { set({ programCompareOpen: true }); requestAnimationFrame(() => $('airing-comparison').scrollIntoView({ block: 'start', behavior: 'smooth' })); });
+$('airing-close-comparison').addEventListener('click', () => set({ programCompareOpen: false }));
+$('airing-group-by').addEventListener('change', event => set({ programGroupBy: event.target.value }));
+$('airing-export-comparison').addEventListener('click', () => downloadCSV(comparisonExportRows, 'FTV_selected_airings.csv'));
 function readPatternTime(id) {
   const match = $(id).value.trim().match(/^(\d{1,2}):([0-5]\d)$/);
   if (!match) throw new Error('Время указывается как ЧЧ:ММ (05:00–29:00)');
@@ -361,13 +446,14 @@ $('show-scan').addEventListener('click', async () => {
     $('scan-image').src = scanURL; $('scan-image').hidden = false;
   } catch (error) { set({ error: error.message }); }
 });
-$('export').addEventListener('click', () => {
-  const url = URL.createObjectURL(new Blob([csvContent(exportRows)], { type: 'text/csv;charset=utf-8' })), link = document.createElement('a');
-  link.href = url; link.download = `FTV_${state.getState().view}_${state.getState().audience}.csv`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-});
+function downloadCSV(rows, filename) {
+  const url = URL.createObjectURL(new Blob([csvContent(rows)], { type: 'text/csv;charset=utf-8' })), link = document.createElement('a');
+  link.href = url; link.download = filename; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+$('export').addEventListener('click', () => downloadCSV(exportRows, `FTV_${state.getState().view}_${state.getState().audience}.csv`));
 try {
   const saved = JSON.parse(localStorage.getItem('FTV_Analytics_Preferences') ?? '{}');
-  state.setState(Object.fromEntries(preferenceFields.filter(key => key in saved).map(key => [key, saved[key]])));
+  state.setState(Object.fromEntries(preferenceFields.filter(key => key in saved && (saved.schemaVersion === 2 || !['view', 'programLayout'].includes(key))).map(key => [key, saved[key]])));
 } catch {} // Corrupt or unavailable local preferences must not prevent database access.
 const initialView = location.hash.slice(1); if (pageCopy[initialView]) set({ view: initialView });
 window.addEventListener('pagehide', () => { importer.close(); disposeCharts(); db.close(); if (scanURL) URL.revokeObjectURL(scanURL); });

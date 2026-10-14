@@ -34,6 +34,12 @@ try {
   await page.waitForFunction(() => document.querySelector('#import-progress').hidden);
   assert.ok(workerURLs.some(url => url.endsWith('importWorker.js')));
   assert.equal(await page.locator('#empty-state').isVisible(), false);
+  await page.locator('#airing-controls').waitFor({ state: 'visible' });
+  await page.waitForFunction(() => document.querySelectorAll('.airing-card').length > 0);
+  assert.equal(await page.locator('#airing-comparison').isVisible(), false);
+  assert.ok((await page.locator('#airing-browser').innerText()).includes('чел.'));
+  await page.screenshot({ path: 'test-results/airings-real-calendar.png', fullPage: true });
+  await page.locator('#navigation [data-view="overview"]').click();
   assert.equal(await page.locator('#overview-kpis button').count(), 4);
   assert.ok(await page.locator('#page-title').evaluate(el => parseFloat(getComputedStyle(el).fontSize) >= 26));
   await page.screenshot({ path: 'test-results/overview-desktop.png', fullPage: true });
@@ -52,6 +58,7 @@ try {
   if (await available.count()) { await available.click(); await available.click(); }
   await page.screenshot({ path: 'test-results/weekdays-desktop.png', fullPage: true });
   await page.locator('#navigation [data-view="programs"]').click();
+  await page.locator('[data-program-layout="schedule"]').click();
   await page.waitForFunction(() => document.querySelectorAll('#program-table tbody tr[data-program]').length === 17);
   await page.locator('#program-search').fill('fresh');
   await page.waitForFunction(() => [...document.querySelectorAll('#program-table .program-title')].every(el => el.textContent.toLowerCase().includes('fresh')) && document.querySelectorAll('#program-table .program-title').length > 0);
@@ -109,6 +116,9 @@ try {
       { id: `${dateISO}_lead`, dateISO, channel: FTV_CHANNEL, title: 'Lead', startSec: 64200, endSec: 64800, share: 2 },
       { id: `${dateISO}_news`, dateISO, channel: FTV_CHANNEL, title: 'News', startSec: 64800, endSec: 65400, share: i === 5 ? 0.5 : 2 },
       { id: `${dateISO}_after`, dateISO, channel: FTV_CHANNEL, title: 'Return', startSec: 65400, endSec: 66000, share: 2 },
+      { id: `${dateISO}_noon`, dateISO, channel: FTV_CHANNEL, title: 'News', startSec: 46800, endSec: 48000, share: 3, demographics: { unit: 'thousandViewers', total: 2 } },
+      { id: `${dateISO}_night`, dateISO, channel: FTV_CHANNEL, title: 'News', startSec: 93600, endSec: 94800, share: 1, demographics: { unit: 'thousandViewers', total: 1 } },
+      { id: `${dateISO}_navo`, dateISO, channel: 'NAVO', title: 'Competitor news', startSec: 64800, endSec: 65400, share: 4 },
     ]) };
   await page.evaluate(async report => { const { db } = await import('/src/core/db.js'); await db.clear(); await db.importReport(report); }, fixture);
   await page.setViewportSize({ width: 1440, height: 1050 });
@@ -139,8 +149,52 @@ try {
   await page.reload({ waitUntil: 'networkidle' });
   assert.equal(await page.locator('#recurrence-start').inputValue(), '18:00');
   assert.equal(await page.locator('#recurrence-signal').inputValue(), 'baseline');
+
+  await page.setViewportSize({ width: 1440, height: 1050 });
+  await page.locator('#navigation [data-view="programs"]').click();
+  await page.locator('[data-program-layout="calendar"]').click();
+  await page.locator('#airing-title').fill('News'); await page.locator('#airing-start').fill('05:00'); await page.locator('#airing-end').fill('29:00'); await page.locator('#airing-apply').click();
+  await page.waitForFunction(() => document.querySelector('#program-count').textContent.includes('18 выходов'));
+  assert.equal(await page.locator('#airing-browser .airing-card').count(), 18);
+  assert.equal(await page.locator('#airing-comparison').isVisible(), false);
+  await page.locator('[data-airing-window="evening"]').click();
+  await page.waitForFunction(() => document.querySelector('#program-count').textContent.includes('6 выходов'));
+  assert.ok((await page.locator('#airing-browser').innerText()).includes('Competitor news'));
+  await page.locator('[data-airing-window="all"]').click();
+  await page.locator('[data-airing-hour="13"]').click();
+  await page.waitForFunction(() => document.querySelector('#program-count').textContent.includes('6 выходов'));
+  await page.locator('[data-airing-weekday="1"]').click();
+  await page.waitForFunction(() => document.querySelector('#program-count').textContent.includes('0 выходов'));
+  await page.locator('[data-airing-weekday="4"]').click();
+  await page.waitForFunction(() => document.querySelector('#program-count').textContent.includes('6 выходов'));
+  await page.locator('[data-program-layout="airings"]').click();
+  await page.waitForFunction(() => document.querySelectorAll('.airing-wide-table tbody tr').length === 6);
+  assert.ok((await page.locator('.airing-wide-table').innerText()).includes('2 000 чел.'));
+  await page.locator('[data-airing-select]').nth(0).check();
+  await page.waitForFunction(() => document.querySelector('#airing-selection-count').textContent.includes('Отмечено 1'));
+  await page.locator('[data-airing-select]').nth(1).check();
+  await page.waitForFunction(() => !document.querySelector('#airing-build-comparison').disabled);
+  await page.locator('#airing-build-comparison').click();
+  await page.locator('#airing-comparison').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#airing-comparison-table tbody tr').count(), 2);
+  await page.locator('#airing-group-by').selectOption('weekday');
+  await page.waitForFunction(() => document.querySelectorAll('#airing-comparison-table tbody tr').length === 1);
+  const selectedDownload = page.waitForEvent('download'); await page.locator('#airing-export-comparison').click();
+  assert.equal((await selectedDownload).suggestedFilename(), 'FTV_selected_airings.csv');
+  await page.screenshot({ path: 'test-results/airings-table-comparison.png', fullPage: true });
+  await page.locator('[data-airing-window="night"]').click();
+  await page.waitForFunction(() => document.querySelector('#airing-selection-count').textContent.includes('скрыты'));
+  await page.locator('#airing-clear-selection').click();
+  await page.locator('[data-program-layout="calendar"]').click();
+  await page.waitForFunction(() => document.querySelectorAll('.airing-card').length === 6);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: 'test-results/airings-mobile.png', fullPage: true });
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2));
+  await page.reload({ waitUntil: 'networkidle' });
+  assert.equal(await page.locator('#airing-start').inputValue(), '23:00');
+  assert.equal(await page.locator('#airing-title').inputValue(), 'News');
   assert.deepEqual(errors, []);
-  console.log('UI smoke passed: worker import, existing views, program drill-down, recurrence sources, six-Thursday anomaly, fixed window, thresholds, CSV, mobile and persistence.');
+  console.log('UI smoke passed: real Worker import, programme calendar/table, daily repeats, custom time/weekday filters, people counts, concurrent programmes, manual selection/comparison, CSV, mobile, existing analytics and persistence.');
 } catch (error) {
   if (page) {
     await page.screenshot({ path: 'test-results/browser-failure.png', fullPage: true }).catch(() => {});

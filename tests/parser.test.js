@@ -5,6 +5,8 @@ import XLSX from 'xlsx';
 import JSZip from 'jszip';
 import { parseWorkbook, parseExcelFile, parseProgramCell, unmergeWorksheet } from '../src/parser/excelParser.js';
 import { detectSlotDrops } from '../src/analytics/dropDetector.js';
+import { buildProgramCatalog } from '../src/analytics/programs.js';
+import { createAiringIndex, filterAirings, describeAiring } from '../src/analytics/airingExplorer.js';
 import { AnalyticsDB } from '../src/core/db.js';
 import { indexedDB, IDBKeyRange } from 'fake-indexeddb';
 
@@ -95,6 +97,16 @@ test('all sample files import without parse warnings; repeat import and reverse 
   assert.deepEqual(after, before);
   const day = await db.get('daily_metrics', '2026-10-06'); assert.equal(day.ftv_18_54.share, 1.81);
   const slot = await db.get('grid_10min', '2026-10-06_0'); assert.equal(Object.keys(slot.channels).length, 7);
+  const catalog = buildProgramCatalog(after), airingIndex = createAiringIndex(catalog, after);
+  const exactFresh = filterAirings(catalog, { title: 'Fresh news (уз)', channel: 'FTV (UZ/RU)', includeApproximate: false });
+  const originalFresh = after.program_logs.filter(row => row.channel === 'FTV (UZ/RU)' && row.title.toLowerCase() === 'fresh news (уз)');
+  assert.deepEqual(exactFresh.map(row => row.id).sort(), originalFresh.map(row => row.id).sort());
+  assert.ok(exactFresh.length > 23); // Multiple daily airings survive programme-first browsing.
+  const freshContext = describeAiring(airingIndex, exactFresh.find(row => row.dateISO === '2026-10-06' && row.startSec === 67611), { competitors: ['NAVO'] });
+  assert.equal(freshContext.viewers, freshContext.program.demographics.total * 1000);
+  assert.equal(freshContext.previous.title, 'UZNONSTOP (уз)');
+  assert.equal(freshContext.next.title, 'Shazam chart (уз)');
+  assert.equal(freshContext.competitors[0].missing, false);
   console.log(`Verified ${files.length} reports: ${after.daily_metrics.length} dates, ${after.grid_10min.length} slots, ${after.program_logs.length} programs.`);
   db.close();
 });
