@@ -1,8 +1,12 @@
 import { assertDateISO } from './normalization.js';
+import { WORKSPACE_INITIAL, validateWorkspace } from './workspace.js';
+import { SIMPLE_VIEW_INITIAL, validateSimpleView } from './simpleView.js';
 
 export const MODES = Object.freeze(['week', 'dayOfWeek', 'season', 'year']);
 export const AUDIENCES = Object.freeze(['18-54', '25-34']);
 export const INITIAL_STATE = Object.freeze({
+  simpleView: SIMPLE_VIEW_INITIAL,
+  workspace: WORKSPACE_INITIAL,
   mode: 'week', audience: '18-54', dateFrom: null, dateTo: null,
   excludeNonWorkdays: false, selectedDayOfWeek: 4, selectedDate: null,
   periodA: null, periodB: null, busy: false, error: null, importProgress: null, revision: 0,
@@ -25,6 +29,8 @@ function freeze(value) {
 }
 
 function validate(value) {
+  validateSimpleView(value.simpleView);
+  validateWorkspace(value.workspace);
   if (!MODES.includes(value.mode)) throw new Error('Неизвестный режим сравнения');
   if (!AUDIENCES.includes(value.audience)) throw new Error('Неизвестная аудитория');
   for (const [key, allowed] of Object.entries({

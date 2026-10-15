@@ -103,3 +103,35 @@ test('invalid intervals and thresholds fail explicitly', () => {
   assert.throws(() => analyzeRecurrence(fixture(), { ...options, retentionThreshold: -1 }));
   assert.throws(() => analyzeRecurrence(fixture(), { ...options, minimumDays: 1 }));
 });
+
+test('manual exclusion cannot return through grid fallback or erase a neighbor and create a different signal', () => {
+  const data = fixture();
+  data.grid_10min = [77, 78, 79].map(slotIndex => ({ dateISO: dates[0], slotIndex, channels: { [channel]: { title: slotIndex === 78 ? 'News' : 'Lead', share: 2 } } }));
+  const catalog = buildProgramCatalog(data), news = catalog.find(row => row.dateISO === dates[0] && row.title === 'News');
+  const excluded = analyzeRecurrence(data, { ...options, includeApproximate: true, excludedIds: [news.id] });
+  assert.equal(excluded.observations[0].reason, 'excludedProgram');
+  assert.equal(excluded.groups[0].eligibleDays, 5); assert.equal(excluded.groups[1].observedDays, 0);
+  const lead = catalog.find(row => row.dateISO === dates[1] && row.title === 'Lead');
+  const intact = analyzeRecurrence(data, { ...options, excludedIds: [lead.id] });
+  assert.equal(intact.observations[1].retention, 50);
+  assert.equal(analyzeRecurrence(data, { ...options, mode: 'slot', excludedIds: [news.id] }).observations[0].reason, 'excludedProgram');
+});
+
+test('date, day type and manual label exclusions have explicit reasons and do not count as healthy dates', () => {
+  const data = fixture(), catalog = buildProgramCatalog(data);
+  data.daily_metrics[1].isWorkday = false;
+  const eligibleProgramIds = catalog.filter(row => row.dateISO !== dates[2]).map(row => row.id);
+  const result = analyzeRecurrence(data, { ...options, excludedDates: [dates[0]], workday: 'workday', eligibleProgramIds });
+  assert.deepEqual(result.observations.slice(0, 3).map(row => row.reason), ['excludedDate', 'dayTypeExcluded', 'labelExcluded']);
+  assert.equal(result.groups[0].eligibleDays, 3); assert.equal(result.competitors[0].dropDays, 3);
+  assert.throws(() => analyzeRecurrence(data, { ...options, excludedDates: ['bad-date'] }));
+});
+
+test('explicit grid and exact sources remain distinct in programme and fixed-time modes', () => {
+  const data = fixture();
+  data.grid_10min = dates.flatMap(dateISO => [77, 78].map(slotIndex => ({ dateISO, slotIndex, channels: { [channel]: { title: slotIndex === 78 ? 'News' : 'Lead', share: 5 } } })));
+  const grid = analyzeRecurrence(data, { ...options, source: 'grid', mode: 'slot', includeApproximate: true });
+  assert.equal(grid.observations[0].share, 5); assert.equal(grid.observations[0].source, 'grid_10min');
+  assert.equal(analyzeRecurrence(data, { ...options, source: 'exact', mode: 'slot', includeApproximate: true }).observations[0].share, 1);
+  assert.equal(analyzeRecurrence(data, { ...options, source: 'grid', includeApproximate: true }).observedDays, 0);
+});

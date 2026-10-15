@@ -39,3 +39,12 @@ Client-side Web SPA for TV ratings analysis, schedule grid visualization, multi-
 ## 5. Coding Standards
 - Keep modules strictly decoupled: `parser/` never touches DOM; `analytics/` contains pure functions only; `ui/` renders state and ECharts.
 - Normalize all decimal commas to dots before `parseFloat()`.
+## 6. Publication workflow
+- Iterate and publish working versions in the existing Sites project.
+- Do not commit or push iterations to the project GitHub repository unless the user explicitly requests publishing that version to GitHub. Sites source synchronization is part of hosting and remains allowed.
+
+## 7. UI direction
+- The main module is the original long Excel viewing chart, cropped to the same selected clock interval and shown side by side across dates.
+- Keep four clear modules: viewing trend, programmes, period comparisons, data/import.
+- No permanent sidebars or custom chart builder in the current version. Controls for dates, weekday buttons, time, channel and optional programme belong above the chart.
+- Never substitute programme averages for the original minute curve. Unavailable scans are explicit, and image time calibration must be verified.

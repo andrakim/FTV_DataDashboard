@@ -17,6 +17,9 @@ function validate(o) {
   if (![o.retentionThreshold, o.baselineDropPercent].every(v => finite(v) && v > 0 && v <= 100) || !finite(o.minimumLeadInShare) || o.minimumLeadInShare < 0 || !finite(o.minimumCoverage) || o.minimumCoverage <= 0 || o.minimumCoverage > 1 || !Number.isInteger(o.minimumDays) || o.minimumDays < 5) throw new Error('Некорректные пороги закономерностей');
   for (const date of [o.from, o.to]) if (date) assertDateISO(date);
   if (o.from && o.to && o.from > o.to) throw new Error('Начало периода позже конца');
+  if (!['all', 'exact', 'grid'].includes(o.source ?? 'all') || !['all', 'workday', 'nonworkday', 'unknown'].includes(o.workday ?? 'all')) throw new Error('Неверный источник или тип дня');
+  for (const key of ['excludedIds', 'excludedDates', 'eligibleProgramIds']) if (o[key] != null && (!Array.isArray(o[key]) || o[key].some(value => typeof value !== 'string'))) throw new Error('Неверные исключения');
+  (o.excludedDates ?? []).forEach(assertDateISO);
 }
 
 function datesInScope(data, o) {
@@ -40,7 +43,11 @@ function byDate(rows) {
 
 function programObservation(rows, o) {
   const allMatches = rows.filter(row => titleKey(row.title) === titleKey(o.title) && row.startSec >= o.startSec && row.startSec < o.endSec);
-  const matches = o.includeApproximate ? allMatches : allMatches.filter(row => !row.approximate);
+  const sourced = allMatches.filter(row => (o.includeApproximate || !row.approximate) && (o.source !== 'exact' || !row.approximate) && (o.source !== 'grid' || row.approximate));
+  const admitted = sourced.filter(row => !(o.excludedIds ?? []).includes(row.id));
+  if (sourced.length && !admitted.length) return { reason: 'excludedProgram' };
+  const matches = admitted.filter(row => !o.eligibleProgramIds || o.eligibleProgramIds.includes(row.id));
+  if (admitted.length && !matches.length) return { reason: 'labelExcluded' };
   if (!matches.length) return { reason: allMatches.length ? 'approximateExcluded' : 'noProgram' };
   // A date is one observation. Two daily airings must not inflate the sample or be chosen silently.
   if (matches.length > 1) return { reason: 'ambiguous', matchCount: matches.length };
@@ -90,9 +97,14 @@ export function analyzeRecurrence(data, options = {}) {
   const allLogs = byDate(data.program_logs ?? []), grids = byDate(data.grid_10min ?? []);
   const dates = datesInScope(data, o);
   const observations = dates.map(dateISO => {
+    if ((o.excludedDates ?? []).includes(dateISO)) return { dateISO, reason: 'excludedDate' };
     if (o.excludeNonWorkdays && daily.get(dateISO)?.isWorkday !== true) return { dateISO, reason: daily.get(dateISO)?.isWorkday === false ? 'nonWorkday' : 'unknownWorkday' };
+    const isWorkday = daily.get(dateISO)?.isWorkday;
+    if (o.workday === 'workday' && isWorkday !== true || o.workday === 'nonworkday' && isWorkday !== false || o.workday === 'unknown' && isWorkday != null) return { dateISO, reason: 'dayTypeExcluded' };
     const logs = (allLogs.get(dateISO) ?? []).filter(row => normalizeChannel(row.channel) === o.channel && (row.audience ?? '18-54') === o.audience);
-    const observation = o.mode === 'program' ? programObservation(catalog.get(dateISO) ?? [], o) : slotObservation(logs, grids.get(dateISO) ?? [], o);
+    const dayPrograms = catalog.get(dateISO) ?? [];
+    if (o.mode === 'slot' && dayPrograms.some(row => (o.excludedIds ?? []).includes(row.id) && row.startSec < o.endSec && row.endSec > o.startSec)) return { dateISO, reason: 'excludedProgram' };
+    const observation = o.mode === 'program' ? programObservation(dayPrograms, o) : slotObservation(o.source === 'grid' ? [] : logs, grids.get(dateISO) ?? [], { ...o, includeApproximate: o.source === 'exact' ? false : o.includeApproximate });
     if (observation.reason) return { dateISO, ...observation };
     const retention = calculateRetention(observation.share, observation.previousShare);
     return { dateISO, ...observation, retention, deltaShare: finite(observation.previousShare) ? observation.share - observation.previousShare : null,
