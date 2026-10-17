@@ -1,17 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import XLSX from 'xlsx';
 import JSZip from 'jszip';
 import { parseWorkbook, parseExcelFile, parseProgramCell, unmergeWorksheet } from '../src/parser/excelParser.js';
 import { detectSlotDrops } from '../src/analytics/dropDetector.js';
 import { buildProgramCatalog } from '../src/analytics/programs.js';
 import { createAiringIndex, filterAirings, describeAiring } from '../src/analytics/airingExplorer.js';
+import { aggregatePeriod } from '../src/analytics/comparator.js';
 import { AnalyticsDB } from '../src/core/db.js';
 import { indexedDB, IDBKeyRange } from 'fake-indexeddb';
 
 const c = v => ({ v, t: typeof v === 'number' ? 'n' : 's' });
-const sampleFiles = existsSync('samples') ? readdirSync('samples').filter(name => name.endsWith('.xlsx')) : [];
+const sampleDirectory = process.env.FTV_SAMPLE_DIR || 'samples';
+const sampleFiles = existsSync(sampleDirectory) ? readdirSync(sampleDirectory).filter(name => name.endsWith('.xlsx')) : [];
 const hasOctoberSample = sampleFiles.some(name => name.includes('06.10.26'));
 const hasFullSampleSet = sampleFiles.length === 23 && hasOctoberSample && sampleFiles.some(name => name.includes('11.11.26'));
 function fixture() {
@@ -42,6 +45,33 @@ test('hidden history, comma decimals, merged slots, and independent AF calendar 
   assert.equal(parsed.metadata.sheetInventory.at(-1).hidden, 1);
 });
 
+test('competitor metrics retain separate audiences within a workbook and across overlapping imports', async () => {
+  const book = fixture();
+  book.Sheets['Сетка_FTV_каналы'].D4 = c(2);
+  book.Sheets['Доля'] = { B3: c('Все:25-34'), A5: c('NAVO'), B5: c('8,00'), '!ref': 'A1:B5' };
+  book.Sheets['Охват'] = { B3: c('Все:18-54'), A5: c('NAVO'), B5: c('20,00'), '!ref': 'A1:B5' };
+  const mixed = parseWorkbook(book);
+  assert.deepEqual(mixed.daily_metrics[0].competitorsDaily.NAVO.audiences, { '18-54': { share: 2, reach: 20 }, '25-34': { share: 8 } });
+  assert.equal(aggregatePeriod(mixed).competitorsDaily.NAVO.share, 2);
+  assert.equal(aggregatePeriod(mixed, { audience: '25-34' }).competitorsDaily.NAVO.share, 8);
+  assert.equal(aggregatePeriod(mixed, { audience: '25-34' }).competitorsDaily.NAVO.reach, null);
+
+  const youngerBook = fixture();
+  youngerBook.Sheets['Охват'] = { B3: c('Все:25-34'), A5: c('NAVO'), B5: c(40), '!ref': 'A1:B5' };
+  const younger = parseWorkbook(youngerBook);
+  for (const reports of [[mixed, younger], [younger, mixed]]) {
+    const db = new AnalyticsDB({ name: `competitor-audiences-${crypto.randomUUID()}`, indexedDB, IDBKeyRange });
+    try {
+      for (const report of reports) await db.importReport(report);
+      const stored = await db.loadData();
+      assert.equal(aggregatePeriod(stored).competitorsDaily.NAVO.share, 2);
+      assert.equal(aggregatePeriod(stored).competitorsDaily.NAVO.reach, 20);
+      assert.equal(aggregatePeriod(stored, { audience: '25-34' }).competitorsDaily.NAVO.share, 8);
+      assert.equal(aggregatePeriod(stored, { audience: '25-34' }).competitorsDaily.NAVO.reach, 40);
+    } finally { db.close(); }
+  }
+});
+
 test('report date falls back to C2, warns on conflicts and never falls back to filenames', () => {
   const book = fixture(); delete book.Sheets['СОДЕРЖАНИЕ'].F1;
   assert.equal(parseWorkbook(book).reportDateISO, '2026-10-06');
@@ -60,8 +90,8 @@ test('a malformed grid time warns and cannot silently shift measurements to anot
 });
 
 test('real 06 October report: 60 dates, eight grids, exact night logs, scan and known Fresh news loss', { skip: !hasOctoberSample }, async () => {
-  const path = readdirSync('samples').find(name => name.includes('06.10.26'));
-  const report = await parseExcelFile(readFileSync(`samples/${path}`), { XLSX, JSZip });
+  const name = sampleFiles.find(name => name.includes('06.10.26'));
+  const report = await parseExcelFile(readFileSync(path.join(sampleDirectory, name)), { XLSX, JSZip });
   assert.deepEqual(report.warnings, []);
   assert.equal(report.daily_metrics.length, 60); assert.equal(report.grid_10min.length, 8 * 144);
   assert.equal(report.program_logs.filter(row => row.demographics).length, 17);
@@ -80,9 +110,9 @@ test('real 06 October report: 60 dates, eight grids, exact night logs, scan and 
 test('all sample files import without parse warnings; repeat import and reverse overlap preserve records', { timeout: 300000, skip: !hasFullSampleSet }, async () => {
   const db = new AnalyticsDB({ name: `samples-${crypto.randomUUID()}`, indexedDB, IDBKeyRange });
   let wronglyNamed, first;
-  const files = readdirSync('samples').filter(name => name.endsWith('.xlsx')).sort();
+  const files = [...sampleFiles].sort();
   for (const name of files) {
-    const report = await parseExcelFile(readFileSync(`samples/${name}`), { XLSX, JSZip, preserveAdditionalSheets: false });
+    const report = await parseExcelFile(readFileSync(path.join(sampleDirectory, name)), { XLSX, JSZip, preserveAdditionalSheets: false });
     assert.deepEqual(report.warnings, [], name);
     assert.equal(report.daily_metrics.length, 60, name);
     assert.equal(report.grid_10min.length, 8 * 144, name);

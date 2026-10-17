@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SCAN_CHANNELS, detectScanGeometry, scanCrop } from '../src/ui/scanGeometry.js';
+import { SCAN_CHANNELS, detectScanGeometry, scanCrop, scaleAtFraction } from '../src/ui/scanGeometry.js';
 
 function sourceFrame(height = 6037) {
   const width = 1530, data = new Uint8ClampedArray(width * height * 4).fill(255);
@@ -59,3 +59,13 @@ test('source pixels round outward for seconds and unconfirmed clocks never crop'
   assert.throws(() => scanCrop({ ...geometry, confidence: 0 }), /не подтверждена/);
   for (const options of [{ startSec: 0 }, { endSec: 104401 }, { startSec: 70000, endSec: 60000 }, { contextSeconds: -1 }, { startSec: NaN }, { channel: 'OTHER CHANNELS' }]) assert.throws(() => scanCrop(geometry, options));
 });
+
+test('scaleAtFraction maps horizontal pointer coordinates to exact 0, 10, 20, 30 header ticks', () => {
+  assert.equal(scaleAtFraction(0).value, 0);
+  assert.equal(scaleAtFraction(37 / 238).value, 0);
+  assert.equal(scaleAtFraction((37 + 57) / 238).value, 10);
+  assert.equal(scaleAtFraction((37 + 114) / 238).value, 20);
+  assert.equal(scaleAtFraction((37 + 171) / 238).value, 30);
+  assert.equal(scaleAtFraction(1).value, 35.1);
+});
+

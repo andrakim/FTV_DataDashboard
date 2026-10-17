@@ -53,6 +53,20 @@ test('empty periods keep missing metrics null and never substitute zeros', () =>
   assert.equal(result.slots[143].endSec, 104400); assert.equal(result.dayCount, 0);
 });
 
+test('daily competitor aggregation reads legacy records and new audience fields without mixing targets', () => {
+  const data = { daily_metrics: [
+    { ...day('2026-10-01', 1), competitorsDaily: { NAVO: { share: 10, audience: '25-34' } } },
+    { ...day('2026-10-02', 1), competitorsDaily: { NAVO: { share: 2 } } },
+    { ...day('2026-10-03', 1), competitorsDaily: { NAVO: { share: 100, reach: 20, audience: '18-54', audiences: { '18-54': { share: 0 }, '25-34': { share: 8 } } } } },
+  ] };
+  const original = structuredClone(data), adults = aggregatePeriod(data), younger = aggregatePeriod(data, { audience: '25-34' });
+  assert.equal(adults.competitorsDaily.NAVO.share, 1);
+  assert.equal(adults.competitorsDaily.NAVO.reach, 20);
+  assert.equal(younger.competitorsDaily.NAVO.share, 9);
+  assert.equal(younger.competitorsDaily.NAVO.reach, null);
+  assert.deepEqual(data, original);
+});
+
 function programs(dateISO = '2026-10-06') {
   return [
     { dateISO, channel: FTV_CHANNEL, title: 'Lead', startSec: 64800, endSec: 65400, share: 2, rtg: 0.2 },

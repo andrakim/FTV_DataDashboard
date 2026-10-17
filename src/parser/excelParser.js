@@ -103,7 +103,7 @@ export function parseWorkbook(workbook, { preserveAdditionalSheets = true } = {}
         const channel = weekly ? FTV_CHANNEL : normalizeChannel(header);
         columns.push({ c, dateISO, channel });
         const share = parseNumber(cell(sheet, 3, c));
-        addDaily(dateISO, channel === FTV_CHANNEL ? { ftv_18_54: { share } } : { competitorsDaily: { [channel]: { share, audience: '18-54' } } }, name, 20);
+        addDaily(dateISO, channel === FTV_CHANNEL ? { ftv_18_54: { share } } : { competitorsDaily: { [channel]: { audiences: { '18-54': { share } } } } }, name, 20);
       });
     }
     for (let r = 5; r <= 148; r++) {
@@ -174,7 +174,7 @@ export function parseWorkbook(workbook, { preserveAdditionalSheets = true } = {}
       const channel = normalizeChannel(cell(sheet, r, 0)), value = parseNumber(cell(sheet, r, 1));
       if (!channel || value == null) continue;
       addDaily(reportDateISO, channel === FTV_CHANNEL ? { [audienceKey]: { [metric]: value } } :
-        { competitorsDaily: { [channel]: { [metric]: value, audience: summaryAudience } } }, name, 30);
+        { competitorsDaily: { [channel]: { audiences: { [summaryAudience]: { [metric]: value } } } } }, name, 30);
     }
   }
 

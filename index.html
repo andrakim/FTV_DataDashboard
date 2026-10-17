@@ -1,23 +1,156 @@
 <!doctype html>
-<html lang="ru"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="Сравнение исходных графиков эфира FTV по датам, дням недели и времени."><title>FTV — анализ эфира</title>
-<script src="https://cdn.tailwindcss.com"></script><script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script><script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script><script defer src="https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js"></script><link rel="stylesheet" href="./src/ui/simple.css">
-</head><body>
-<header class="app-header"><a href="#trend" class="brand">FTV <span>Аналитика</span></a><div class="header-actions"><span id="dataset-status">Нет данных</span><button id="upload" class="button">Загрузить Excel</button></div></header>
-<nav class="module-tabs" aria-label="Модули приложения"><button data-module="trend" class="is-active">Тенденция эфира</button><button data-module="programmes">Программы</button><button data-module="periods">Сравнение периодов</button><button data-module="data">Данные</button></nav>
-<main><div id="status" role="status" hidden></div><div id="import-progress" hidden><progress id="import-meter" value="0" max="1"></progress><span id="import-label"></span></div>
-<section id="empty-state" class="empty-panel"><h1>Сравнивайте эфир по дням</h1><p>Загрузите ежедневные Excel-отчёты. Здесь появятся их исходные графики: один канал, одинаковое время, несколько дат рядом.</p><button data-upload class="button">Загрузить отчёты</button></section>
-<div id="app-content" hidden>
-<section id="view-filters" class="panel filter-panel" aria-label="Выбор дней и времени"><div class="filter-row">
-<label class="field">С даты<input id="date-from" type="date"></label><label class="field">По дату<input id="date-to" type="date"></label><div class="field days-field"><span>Дни недели</span><div id="weekdays" class="weekday-buttons" role="group" aria-label="Дни недели"></div></div><div class="field quick-days"><span>Выбрать</span><div><button id="workweek" class="text-button">Пн–Пт</button><button id="all-weekdays" class="text-button">Все дни</button></div></div><label class="field">От<input id="time-start" inputmode="numeric" value="18:00" aria-label="Начало окна"></label><label class="field">До<input id="time-end" inputmode="numeric" value="19:00" aria-label="Конец окна"></label><button id="apply-filters" class="button">Показать</button>
-</div><div class="filter-row secondary-row"><label class="field">Канал<select id="channel"></select></label><label class="field programme-field">Программа (необязательно)<input id="programme" list="programme-options" placeholder="Все программы в выбранное время"><datalist id="programme-options"></datalist></label><button id="clear-programme" class="text-button">Сбросить программу</button><div class="range-presets"><button data-window="64800,68400" class="button secondary">18:00–19:00</button><button data-window="64800,82800" class="button secondary">18:00–23:00</button><button data-window="18000,104400" class="button secondary">Весь эфир</button></div></div></section>
-<section data-panel="trend"><div class="section-heading"><div><h1 id="trend-heading">Тенденция эфира</h1><p id="trend-scope"></p></div><label class="field scale-field">Масштаб<select id="scan-scale"><option value="fit">Вместить даты</option><option value="large">Крупнее</option><option value="larger">Ещё крупнее</option></select></label></div><div class="board-toolbar"><div><button data-shift-week="-7" class="button secondary">← Неделя</button><button data-shift-week="7" class="button secondary">Неделя →</button></div><span id="page-description"></span><div><button id="previous-dates" class="button secondary">← Даты</button><button id="next-dates" class="button secondary">Даты →</button></div></div><p class="module-note">Исходные графики 18–54 из Excel. Одинаковое время во всех колонках; шкала доли сохранена над каждой датой. Нажмите на график для просмотра программ в этот момент.</p><div id="scan-viewer" class="scan-scroll" aria-label="Сравнение исходных графиков"></div><p class="module-note">Линия взята из отчёта. Числа под графиком — средние программы; поминутные значения из картинки не рассчитываются.</p></section>
-<section data-panel="programmes" hidden><div class="section-heading"><div><h1>Выходы программ</h1><p id="programmes-scope"></p></div><button id="export-programmes" class="button secondary">Экспорт CSV</button></div><p class="module-note">Программы, которые пересекают выбранное время. Каждый повтор — отдельная строка. Нажмите выход для входа, выхода и конкурентов.</p><div class="table-wrap"><table id="programmes-table" class="data-table"></table></div><div id="programmes-pagination" class="board-toolbar"></div></section>
-<section data-panel="periods" hidden><div class="section-heading"><div><h1>Сравнение периодов</h1><p>Дневные показатели и профиль целых эфирных суток</p></div><button id="export-periods" class="button secondary">Экспорт CSV</button></div><div id="period-module"></div></section>
-<section data-panel="data" hidden><div class="section-heading"><div><h1>Загруженные данные</h1><p id="data-scope"></p></div><div class="header-actions"><button id="backup" class="button secondary">Резервная копия</button><button id="restore" class="button secondary">Восстановить</button></div></div><p class="module-note">Исходный график есть только за дату ежедневного отчёта. История за 60 дней и недельная сетка не содержат картинки за каждый день. Для сравнения пяти дней загрузите пять ежедневных отчётов.</p><p class="module-note">Резервная копия включает числовые данные и настройки. Исходные картинки добавляются повторной загрузкой Excel.</p><div class="table-wrap"><table id="data-table" class="data-table"></table></div><details id="import-results" hidden><summary>Последний импорт</summary><div id="import-result-list"></div></details></section>
-</div></main>
-<input id="files" type="file" accept=".xlsx,.xlsm" multiple hidden><input id="backup-file" type="file" accept="application/json,.json" hidden>
-<dialog id="detail-dialog"><div class="dialog-heading"><h2 id="detail-title">Программа</h2><button data-close="detail-dialog" class="button secondary">Закрыть ×</button></div><div id="detail-content"></div></dialog>
-<dialog id="original-dialog" class="original-dialog"><div class="dialog-heading"><h2 id="original-title">Исходный график</h2><button data-close="original-dialog" class="button secondary">Закрыть ×</button></div><div class="original-scroll"><img id="original-image" alt="Исходный график телесмотрения из ежедневного отчёта"></div></dialog>
-<script type="module" src="./src/app.js"></script></body></html>
-
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Аналитика эфира FTV: исходные графики Excel, программы и точное сравнение периодов.">
+  <meta name="theme-color" content="#14263e">
+  <title>FTV — аналитика эфира</title>
+  <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js"></script>
+  <link rel="stylesheet" href="./src/ui/simple.css">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Перейти к содержимому</a>
+  <header class="app-header">
+    <a href="#trend" class="brand"><span class="brand-mark">FTV<span class="brand-dot"></span></span><span class="brand-description">Аналитика эфира<small>Данные. Программы. Аудитория.</small></span></a>
+    <div class="header-actions"><span id="dataset-status">Нет данных</span><button id="upload" class="button"><span aria-hidden="true">＋</span> Загрузить Excel</button></div>
+  </header>
+  <nav class="module-tabs" aria-label="Модули приложения">
+    <button data-module="trend" class="is-active"><span class="tab-number" aria-hidden="true">01</span>Тенденция эфира</button>
+    <button data-module="programmes"><span class="tab-number" aria-hidden="true">02</span>Программы</button>
+    <button data-module="periods"><span class="tab-number" aria-hidden="true">03</span>Сравнение периодов</button>
+    <button data-module="data"><span class="tab-number" aria-hidden="true">04</span>Данные и импорт</button>
+  </nav>
+  <main id="main-content">
+    <div id="status" role="status" hidden></div>
+    <div id="import-progress" role="status" hidden><progress id="import-meter" value="0" max="1"></progress><span id="import-label"></span></div>
+    <section id="empty-state" class="empty-panel">
+      <div class="eyebrow">Рабочее пространство FTV</div><h1>Весь эфир.<br>В одном окне.</h1>
+      <p>Сравнивайте исходные графики по дням, находите слабые места программ и следите за изменением аудитории.</p>
+      <div class="empty-actions"><button data-upload class="button">＋ Загрузить Excel-отчёты</button><button data-restore class="button secondary">Восстановить копию</button></div>
+      <div class="onboarding-steps"><div><span>01</span><strong>Загрузите отчёты</strong><p>Один или несколько файлов Excel. История сохранится в этом браузере.</p></div><div><span>02</span><strong>Выберите эфир</strong><p>Даты, дни недели и одинаковое время для всех графиков.</p></div><div><span>03</span><strong>Сравните результат</strong><p>Оригинальная линия, точные выходы и эфир конкурентов рядом.</p></div></div>
+      <div class="privacy-note">Отчёты обрабатываются на вашем устройстве. Данные хранятся в этом браузере.</div>
+    </section>
+    <div id="app-content" hidden>
+      <section id="view-filters" class="panel filter-panel" aria-label="Выбор дней и времени">
+        <div class="filter-heading"><div><span class="eyebrow">Выбор эфира</span><span class="audience-label">Аудитория 18–54</span></div><button id="filter-toggle" class="text-button filter-toggle" aria-expanded="true" aria-controls="filter-fields">Свернуть ↑</button><button id="reset-filters" class="text-button">Сбросить фильтры</button></div>
+        <p id="filter-summary" class="filter-summary"></p>
+        <div id="filter-fields">
+        <div class="filter-row">
+          <label class="field">С даты<input id="date-from" type="date"></label><label class="field">По дату<input id="date-to" type="date"></label>
+          <div class="field days-field"><span>Дни недели</span><div id="weekdays" class="weekday-buttons" role="group" aria-label="Дни недели"></div></div>
+          <div class="field quick-days"><span>Быстрый выбор</span><div><button id="workweek" class="text-button">Пн–Пт</button><button id="all-weekdays" class="text-button">Все дни</button></div></div>
+          <label class="field">С<input id="time-start" inputmode="numeric" value="18:00" aria-label="Начало окна" aria-describedby="clock-help"></label>
+          <label class="field">До<input id="time-end" inputmode="numeric" value="19:00" aria-label="Конец окна" aria-describedby="clock-help"></label>
+          <button id="apply-filters" class="button">Показать</button>
+        </div>
+        <div class="filter-shortcuts"><div class="shortcut-group"><button data-date-preset="latest" class="chip">Последние 7 дней</button><button data-date-preset="all" class="chip">Все загруженные даты</button></div><span id="clock-help">Эфирные сутки 05:00–29:00 · после полуночи: 24:00–29:00</span></div>
+        <div class="filter-row secondary-row">
+          <label class="field">Канал<select id="channel"></select></label>
+          <label class="field programme-field">Программа · необязательно<input id="programme" list="programme-options" placeholder="Все программы в выбранное время"><datalist id="programme-options"></datalist></label>
+          <button id="clear-programme" class="text-button">Сбросить программу</button>
+          <div class="range-presets" role="group" aria-label="Интервал эфира"><button data-window="64800,68400" class="chip">18:00–19:00</button><button data-window="64800,82800" class="chip">Прайм 18:00–23:00</button><button data-window="18000,104400" class="chip">Весь эфир</button></div>
+        </div>
+        <p id="filter-pending" class="pending-note" hidden>Есть изменения. Нажмите «Показать», чтобы обновить выборку.</p>
+        </div>
+      </section>
+      <section id="trend-panel" data-panel="trend">
+        <div class="section-heading">
+          <div><div class="eyebrow">Просмотр и сравнение</div><h1 id="trend-heading">Тенденция эфира</h1><p id="trend-scope"></p></div>
+          <div class="trend-heading-controls">
+            <label class="field scale-field">Дней в ряду<select id="page-size"><option value="5">По 5 дат</option><option value="7">По 7 дат (Пн–Вс)</option><option value="10">По 10 дат</option><option value="31">Все даты</option></select></label>
+            <label class="field scale-field">Масштаб<select id="scan-scale"><option value="fit">Вместить даты</option><option value="large">Крупнее</option><option value="larger">Ещё крупнее</option></select></label>
+            <button type="button" id="toggle-fullscreen" class="button secondary" data-toggle-fullscreen title="Развернуть графики во весь экран (клавиша F)">⛶ Во весь экран</button>
+          </div>
+        </div>
+        <div id="selection-summary" class="selection-summary" aria-label="Состав выборки"></div>
+        <div id="scan-availability" class="availability-note" hidden></div>
+        <div class="board-toolbar sticky-board-toolbar">
+          <div class="toolbar-group">
+            <button data-shift-week="-7" class="button secondary" aria-label="Предыдущая неделя">← Неделя</button>
+            <button data-shift-week="7" class="button secondary" aria-label="Следующая неделя">Неделя →</button>
+            <button type="button" id="full-week-btn" class="button secondary" title="Показать всю неделю с понедельника по воскресенье (7 графиков в ряд)">Пн–Вс (7 дней)</button>
+          </div>
+          <div class="toolbar-group fs-only-controls">
+            <select id="fs-channel" aria-label="Канал в полном экране"></select>
+            <button type="button" data-fs-window="64800,68400" class="chip">18–19</button>
+            <button type="button" data-fs-window="64800,82800" class="chip">Прайм 18–23</button>
+            <button type="button" data-fs-window="18000,104400" class="chip">Весь эфир</button>
+          </div>
+          <div class="toolbar-group toolbar-toggles">
+            <label class="checkbox-field"><input id="only-scans" type="checkbox">Только с графиком</label>
+            <label class="checkbox-field"><input id="show-drop-pins" type="checkbox" checked>Обвалы на графике</label>
+          </div>
+          <div class="toolbar-group">
+            <button id="previous-dates" class="button secondary" aria-label="Предыдущие даты">← Даты</button>
+            <button id="next-dates" class="button secondary" aria-label="Следующие даты">Даты →</button>
+            <button type="button" class="button secondary fs-exit-btn" data-toggle-fullscreen>Свернуть ✕</button>
+          </div>
+        </div>
+        <div id="drop-jump-bar" class="drop-jump-bar" hidden></div>
+        <div id="annotation-toolbar" class="annotation-toolbar">
+          <div class="ann-tools-row">
+            <span class="ann-toolbar-label">Режим клика по графику:</span>
+            <div class="segmented" role="group" aria-label="Инструменты анализа на графике">
+              <button type="button" class="chip is-active" data-ann-tool="inspect" aria-pressed="true">🔍 Детали эфира</button>
+              <button type="button" class="chip" data-ann-tool="pin" aria-pressed="false">📍 Поставить метку</button>
+              <button type="button" class="chip" data-ann-tool="trend" aria-pressed="false">📈 Линия тренда (2 точки)</button>
+              <button type="button" class="chip" data-ann-tool="hline" aria-pressed="false">📏 Срез времени (Y)</button>
+              <button type="button" class="chip" data-ann-tool="vline" aria-pressed="false">📐 Порог доли (X)</button>
+            </div>
+            <select id="ann-tag" class="ann-select" aria-label="Тип метки">
+              <option value="drop">▼ Провал</option>
+              <option value="peak">▲ Пик</option>
+              <option value="hold">✓ Удержание</option>
+              <option value="ad">⏸ Стык / Реклама</option>
+              <option value="note">📌 Заметка</option>
+            </select>
+            <input id="ann-note" class="ann-input" type="text" placeholder="Комментарий к метке / тренду (необязательно)…">
+            <div class="ann-actions">
+              <button type="button" id="export-annotations" class="text-button" hidden>↓ Метки CSV</button>
+              <button type="button" id="clear-annotations" class="text-button danger-text" hidden>Очистить метки</button>
+            </div>
+          </div>
+          <div id="annotation-summary" class="annotation-summary" hidden></div>
+        </div>
+        <div class="board-caption"><span id="page-description"></span><span id="board-hint">Один момент во всех датах · координаты X (доля) и Y (время) синхронны</span></div>
+        <div id="scan-viewer" class="scan-scroll" aria-label="Сравнение исходных графиков"></div>
+        <div id="board-bottom-toolbar" class="board-toolbar bottom-board-toolbar">
+          <div class="toolbar-group">
+            <button type="button" data-bottom-shift-week="-7" class="button secondary">← Предыдущая неделя</button>
+            <button type="button" data-bottom-shift-week="7" class="button secondary">Следующая неделя →</button>
+          </div>
+          <span id="bottom-page-status"></span>
+          <div class="toolbar-group">
+            <button type="button" id="prev-dates-bottom" class="button secondary">← Даты</button>
+            <button type="button" id="next-dates-bottom" class="button secondary">Даты →</button>
+            <button type="button" id="scroll-top-trend" class="button secondary">↑ Наверх к фильтрам</button>
+            <button type="button" class="button secondary" data-toggle-fullscreen>⛶ Во весь экран</button>
+          </div>
+        </div>
+        <details class="method-note"><summary>Как читать график</summary><p>Это исходная линия 18–54 из Excel. В каждой колонке одинаковое время и исходная шкала доли. Числа под графиком — средние программы; поминутные значения из картинки не рассчитываются. Для даты без картинки нужен ежедневный отчёт.</p></details>
+      </section>
+      <section data-panel="programmes" hidden>
+        <div class="section-heading"><div><div class="eyebrow">Точные выходы и контекст</div><h1>Программы в эфире</h1><p id="programmes-scope"></p></div><button id="export-programmes" class="button secondary">↓ Экспорт CSV</button></div>
+        <div class="programme-tools panel"><div class="field"><span>Представление</span><div class="segmented" role="group" aria-label="Представление программ"><button type="button" class="button secondary is-active" data-program-mode="airings" aria-pressed="true">По выходам</button><button type="button" class="button secondary" data-program-mode="summary" aria-pressed="false">Сводка по названиям</button></div></div><label class="field programme-search">Поиск в выборке<input id="program-search" type="search" placeholder="Название или часть названия…"></label><label class="field">Порядок<select id="program-sort"><option value="time">По дате и времени</option><option value="share-desc">По доле: сначала выше</option><option value="share-asc">По доле: сначала ниже</option><option value="retention-asc">По удержанию входа: сначала провалы</option></select></label><label class="field">Сигналы эфира<select id="program-signal"><option value="all">Все выходы</option><option value="pain">Только провалы слота</option><option value="leadInDrop">Обвал на стыке ≤70%</option><option value="primeUnderperformance">Просадка прайма</option><option value="midBlockValley">Яма внутри связки</option></select></label><label class="field">Источник<select id="program-source"><option value="all">Все выходы</option><option value="exact">Только точные TOP</option><option value="grid">Только сетка ≈</option></select></label><span id="program-result-count"></span></div>
+        <p class="module-note">Выходы, пересекающие выбранное время. Нажмите строку, чтобы увидеть удержание входа и выхода, демографию, динамику выпусков и эфир конкурентов.</p>
+        <div class="table-wrap"><table id="programmes-table" class="data-table" aria-label="Выходы программ"></table></div><div id="programmes-pagination" class="board-toolbar"></div>
+      </section>
+      <section data-panel="periods" hidden><div class="section-heading"><div><div class="eyebrow">Динамика аудитории</div><h1>Сравнение периодов</h1><p>Недели, дни недели, сезоны и годы · дневные показатели, тайм-блоки и профиль эфира</p></div><button id="export-periods" class="button secondary">↓ Экспорт CSV</button></div><div id="period-module"></div></section>
+      <section data-panel="data" hidden>
+        <div class="section-heading"><div><div class="eyebrow">Библиотека отчётов</div><h1>Данные и импорт</h1><p id="data-scope"></p></div><div class="header-actions"><button id="backup" class="button secondary">↓ Резервная копия</button><button id="restore" class="button secondary">Восстановить</button><button id="clear-db" class="button secondary danger-button">Очистить базу</button><button data-upload class="button">＋ Добавить отчёты</button></div></div>
+        <div id="import-receipt" class="import-receipt" hidden></div>
+        <div id="drop-zone" class="data-help panel drop-zone"><strong>Перетащите файлы Excel (.xlsx) сюда или нажмите «Добавить отчёты»</strong><p>Каждому исходному графику нужен свой ежедневный отчёт. История за 60 дней и недельная сетка добавляют числовые данные. Картинка сохраняется только за дату самого отчёта.</p></div>
+        <div class="table-wrap"><table id="data-table" class="data-table" aria-label="Доступность данных по датам"></table></div><details id="import-results" hidden><summary>Подробности последнего импорта</summary><div id="import-result-list"></div></details>
+      </section>
+    </div>
+    <footer class="app-footer"><span>FTV · Broadcast Analytics</span><span>05:00–29:00 <span class="footer-dot">·</span> Источник: Excel-отчёты</span></footer>
+  </main>
+  <input id="files" type="file" accept=".xlsx,.xlsm" multiple hidden><input id="backup-file" type="file" accept="application/json,.json" hidden>
+  <dialog id="detail-dialog" aria-labelledby="detail-title"><div class="dialog-heading"><h2 id="detail-title">Программа</h2><button data-close="detail-dialog" class="button secondary">Закрыть ×</button></div><div id="detail-content"></div></dialog>
+  <dialog id="original-dialog" class="original-dialog" aria-labelledby="original-title"><div class="dialog-heading"><h2 id="original-title">Исходный график</h2><button data-close="original-dialog" class="button secondary">Закрыть ×</button></div><div class="original-scroll"><img id="original-image" alt="Исходный график телесмотрения из ежедневного отчёта"></div></dialog>
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>

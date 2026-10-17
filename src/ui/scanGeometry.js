@@ -94,3 +94,22 @@ export function scanCrop(geometry, { channel = FTV_CHANNEL, startSec = BROADCAST
     plotLeft: selected ? selected.left - x : FRAME_LEFT,
   };
 }
+
+const SCALE_PIXELS_PER_UNIT = 5.7; // Verified: ticks 0, 10, 20, 30 are at dx = 0, 57, 114, 171 px inside each 200px panel
+
+export function scaleAtFraction(xFraction, canvasWidth = CLOCK_WIDTH + FRAME_WIDTH + 1, plotLeft = FRAME_LEFT) {
+  const clamped = Number.isFinite(xFraction) ? Math.max(0, Math.min(1, xFraction)) : 0;
+  const plotX = Math.max(0, Math.min(FRAME_WIDTH, clamped * canvasWidth - plotLeft));
+  return {
+    value: Math.round((plotX / SCALE_PIXELS_PER_UNIT) * 10) / 10,
+    leftPercent: ((plotLeft + plotX) / canvasWidth) * 100,
+  };
+}
+
+export function fractionAtScale(scaleValue, canvasWidth = CLOCK_WIDTH + FRAME_WIDTH + 1, plotLeft = FRAME_LEFT) {
+  const val = Number.isFinite(scaleValue) ? Math.max(0, scaleValue) : 0;
+  const plotX = Math.max(0, Math.min(FRAME_WIDTH, val * SCALE_PIXELS_PER_UNIT));
+  return ((plotLeft + plotX) / canvasWidth) * 100;
+}
+
+

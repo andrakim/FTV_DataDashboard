@@ -28,10 +28,28 @@ test('program filters respect audience, workdays, date, case-insensitive search 
 });
 
 test('program summaries use duration weights and keep identical titles on different channels separate', () => {
-  const rows = [{ id: 'a', dateISO, channel, title: 'News', share: 0, rtg: .1, durationMin: 10, startSec: 18000 }, { id: 'b', dateISO: '2026-10-05', channel, title: 'News', share: 4, rtg: .2, durationMin: 30, startSec: 18000, approximate: true }, { id: 'c', dateISO, channel: 'NAVO', title: 'News', share: 10, durationMin: 10, startSec: 18000 }];
+  const rows = [{ id: 'a', dateISO, channel, title: 'News', share: 0, rtg: .1, durationMin: 10, startSec: 18000 }, { id: 'b', dateISO: '2026-10-05', channel, title: 'News', share: 4, rtg: .2, durationMin: 30, startSec: 18000 }, { id: 'c', dateISO, channel: 'NAVO', title: 'News', share: 10, durationMin: 10, startSec: 18000 }];
   const summary = summarizePrograms(rows);
   assert.equal(summary.length, 2); assert.equal(summary[0].share, 3); assert.equal(summary[0].count, 2); assert.equal(summary[0].dayCount, 2);
-  assert.equal(summary[0].id, 'a'); assert.equal(summary[0].approximateCount, 1);
+  assert.equal(summary[0].id, 'a'); assert.equal(summary[0].approximateCount, 0);
+});
+
+test('program summaries keep exact, grid and different audience measurements separate', () => {
+  const common = { dateISO, channel, title: 'News', durationMin: 10, startSec: 18000 };
+  const rows = [
+    { ...common, id: 'exact', share: 1 },
+    { ...common, id: 'exact2', share: 3, audience: '18-54', source: 'program_logs' },
+    { ...common, id: 'grid', share: 9, approximate: true },
+    { ...common, id: 'younger', share: 20, audience: '25-34', source: 'program_logs' },
+  ];
+  const original = structuredClone(rows), summary = summarizePrograms(rows);
+  assert.equal(summary.length, 3);
+  const exact = summary.find(row => row.source === 'program_logs' && row.audience === '18-54');
+  assert.equal(exact.share, 2); assert.equal(exact.count, 2); assert.equal(exact.approximateCount, 0);
+  const grid = summary.find(row => row.source === 'grid_10min');
+  assert.equal(grid.share, 9); assert.equal(grid.approximateCount, 1);
+  assert.equal(summary.find(row => row.audience === '25-34').share, 20);
+  assert.deepEqual(rows, original);
 });
 
 test('program drill-down finds correct broadcast slot and does not connect across gaps or dates', () => {

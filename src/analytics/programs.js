@@ -60,13 +60,15 @@ export function filterPrograms(catalog, { from, to, dateISO, channel, query = ''
 export function summarizePrograms(rows) {
   const groups = new Map();
   for (const row of rows) {
-    const key = `${row.channel}\0${row.title}`;
+    const audience = row.audience ?? '18-54', source = row.source ?? (row.approximate ? 'grid_10min' : 'program_logs');
+    const key = `${row.channel}\0${audience}\0${source}\0${row.title}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(row);
   }
   return [...groups.values()].map(airings => {
     airings.sort((a, b) => b.dateISO.localeCompare(a.dateISO) || b.startSec - a.startSec);
-    return { id: airings[0].id, title: airings[0].title, channel: airings[0].channel, count: airings.length,
+    return { id: airings[0].id, title: airings[0].title, channel: airings[0].channel,
+      audience: airings[0].audience ?? '18-54', source: airings[0].source ?? (airings[0].approximate ? 'grid_10min' : 'program_logs'), count: airings.length,
       dayCount: new Set(airings.map(row => row.dateISO)).size, durationMin: mean(airings.map(row => row.durationMin)),
       share: weightedMean(airings.map(row => ({ value: row.share, weight: row.durationMin }))),
       rtg: weightedMean(airings.map(row => ({ value: row.rtg, weight: row.durationMin }))),

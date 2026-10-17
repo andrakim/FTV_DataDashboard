@@ -1,8 +1,9 @@
 import { TREND_DEFAULTS, validateTrendFilters } from '../analytics/trendExplorer.js';
 
-export const SIMPLE_VIEW_INITIAL = Object.freeze({ tab: 'trend', filters: structuredClone(TREND_DEFAULTS), scale: 'fit', page: 1 });
+export const SIMPLE_VIEW_INITIAL = Object.freeze({ tab: 'trend', filters: structuredClone(TREND_DEFAULTS), scale: 'fit', page: 1, onlyScans: false });
 export function validateSimpleView(value) {
   if (!['trend', 'programmes', 'periods', 'data'].includes(value.tab) || !['fit', 'large', 'larger'].includes(value.scale) || !Number.isInteger(value.page) || value.page < 1) throw new Error('Неверное представление.');
+  if (typeof value.onlyScans !== 'boolean') throw new Error('Неверная настройка доступных графиков.');
   validateTrendFilters(value.filters); return value;
 }
 export function restoreSimpleView(saved) {

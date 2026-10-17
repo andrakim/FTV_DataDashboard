@@ -160,3 +160,28 @@ test('time lookup follows half-open boundaries, preserves competing matches, and
   assert.deepEqual(programmesAtTime(catalog, monday, 66000, FTV_CHANNEL), []);
   assert.deepEqual(programmesAtTime(catalog, monday, 64799, FTV_CHANNEL), []);
 });
+
+test('programme search and sorting preserve repeats, zeros, missing values and source boundaries', () => {
+  const exactZero = airing('zero', monday, 64800, 65000, { title: 'Fresh   news', share: 0, approximate: false });
+  const exactHigh = airing('high', monday, 65000, 65400, { title: 'FRESH NEWS', share: 8, approximate: false });
+  const approximate = airing('grid', friday, 64800, 65400, { title: 'Fresh news', share: 2, approximate: true });
+  const missing = airing('missing', monday, 66000, 66400, { title: 'Fresh news', share: null, approximate: false });
+  const other = airing('other', monday, 67000, 67400, { title: 'Film', share: 99 });
+  const days = [{ matches: [missing, other, exactHigh, exactZero, approximate] }], before = structuredClone(days);
+  assert.deepEqual(trendProgrammes(days, { search: '  fresh nEws ', sort: 'share-asc' }).map(row => row.id), ['zero', 'grid', 'high', 'missing']);
+  assert.deepEqual(trendProgrammes(days, { search: 'news', sort: 'share-desc', source: 'exact' }).map(row => row.id), ['high', 'zero', 'missing']);
+  assert.deepEqual(trendProgrammes(days, { source: 'grid' }).map(row => row.id), ['grid']);
+  assert.deepEqual(trendProgrammes(days, { search: 'missing title' }), []);
+  assert.deepEqual(days, before);
+});
+
+test('available-scan preference restores old settings and rejects malformed backup values', () => {
+  assert.equal(restoreSimpleView({ filters: { from: monday, to: friday } }).onlyScans, false);
+  assert.equal(restoreSimpleView({ onlyScans: true }).onlyScans, true);
+  assert.throws(() => restoreSimpleView({ onlyScans: 'false' }));
+});
+
+test('oversized date ranges are rejected before saving settings or restoring a backup', () => {
+  assert.throws(() => validateTrendFilters(filters({ from: '2000-01-01', to: '2026-10-15' })), /10 лет/);
+  assert.throws(() => restoreSimpleView({ filters: { from: '2000-01-01', to: '2026-10-15' } }), /10 лет/);
+});

@@ -98,6 +98,16 @@ function aggregateRegions(daily, audience) {
   }));
 }
 
+function dailyCompetitorMetrics(values, audience) {
+  if (!values) return null;
+  // Existing databases/backups used flat metrics with an optional audience tag.
+  // New imports keep each audience separately; a measured nested field wins.
+  const legacy = (values.audience ?? '18-54') === audience ? values : null;
+  const measured = values.audiences?.[audience];
+  if (!measured) return legacy;
+  return { ...legacy, ...Object.fromEntries(Object.entries(measured).filter(([, value]) => finite(value))) };
+}
+
 export function aggregatePeriod(data, options = {}) {
   const { audience = '18-54' } = options, key = audienceKey(audience);
   const daily = filterDailyRecords(data.daily_metrics ?? [], options), dates = new Set(daily.map(row => row.dateISO));
@@ -109,8 +119,7 @@ export function aggregatePeriod(data, options = {}) {
   const competitorNames = new Set(daily.flatMap(row => Object.keys(row.competitorsDaily ?? {})));
   const competitorsDaily = Object.fromEntries([...competitorNames].map(channel => [channel,
     Object.fromEntries(METRICS.map(metric => [metric, mean(daily.map(row => {
-      const values = row.competitorsDaily?.[channel];
-      return (values?.audience ?? '18-54') === audience ? values?.[metric] : null;
+      return dailyCompetitorMetrics(row.competitorsDaily?.[channel], audience)?.[metric];
     }))]))]));
   return {
     dates: [...dates], dayCount: daily.length, audience, daily: metrics, competitorsDaily,
